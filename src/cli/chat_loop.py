@@ -26,8 +26,9 @@ class ChatLoop:
 
     def _display_welcome(self):
         self.console.print("[bold cyan]Welcome to the CLI Chat Loop![/bold cyan]")
+        self.console.print(f"Current Model: [bold green]{self.llm.model}[/bold green]")
         self.console.print("Type [bold yellow]/exit[/bold yellow] or [bold yellow]/quit[/bold yellow] to leave.")
-        self.console.print("Commands: [green]/reasoning-on[/green], [green]/reasoning-off[/green]")
+        self.console.print("Commands: [green]/models[/green], [green]/model <id>[/green], [green]/reasoning-on[/green], [green]/reasoning-off[/green]")
         self.console.print("-" * 50)
 
     def run(self):
@@ -41,8 +42,35 @@ class ChatLoop:
             try:
                 user_input = input("You: ").strip()
                 if not user_input: continue
-                if user_input.lower() in ["/exit", "/quit"]: self._handle_exit(None, None)
-                if user_input == "/reasoning-on": self.reasoning_enabled = True; self.console.print("[bold green]Reasoning mode enabled.[/bold green]"); continue
+                if user_input == "/models":
+                    self.console.print("[bold cyan]Available Models:[/bold cyan]")
+                    for m in Config.AVAILABLE_MODELS:
+                        star = "*" if m == self.llm.model else " "
+                        reasoning_opt = "[reasoning]" if m in Config.REASONING_MODELS else ""
+                        self.console.print(f" {star} {m} {reasoning_opt}")
+                    continue
+                
+                if user_input.startswith("/model "):
+                    new_model = user_input.split(" ", 1)[1].strip()
+                    if new_model in Config.AVAILABLE_MODELS:
+                        from src.llm.groq.factory import get_llm_client
+                        self.llm = get_llm_client(new_model)
+                        self.console.print(f"[bold green]Switched to model: {new_model}[/bold green]")
+                        if new_model not in Config.REASONING_MODELS and self.reasoning_enabled:
+                            self.reasoning_enabled = False
+                            self.console.print("[bold yellow]Note: Reasoning mode disabled as it's not recommended for this model.[/bold yellow]")
+                    else:
+                        self.console.print(f"[bold red]Error: Model '{new_model}' not found in available models.[/bold red]")
+                    continue
+
+                if user_input == "/reasoning-on":
+                    if self.llm.model in Config.REASONING_MODELS:
+                        self.reasoning_enabled = True
+                        self.console.print("[bold green]Reasoning mode enabled.[/bold green]")
+                    else:
+                        self.console.print(f"[bold yellow]Warning: Reasoning is not explicitly optimized for {self.llm.model}, but enabling anyway.[/bold yellow]")
+                        self.reasoning_enabled = True
+                    continue
                 if user_input == "/reasoning-off": self.reasoning_enabled = False; self.console.print("[bold yellow]Reasoning mode disabled.[/bold yellow]"); continue
 
                 self.messages.append({"role": "user", "content": user_input})
