@@ -9,9 +9,7 @@ with the undo system for automatic checkpoints.
 import os
 import difflib
 from typing import List, Dict, Optional
-
-from rich.console import Console
-from rich.syntax import Syntax
+from src.ui.rich_ui import ui
 
 
 def edit_file(path: str, edits: list, undo_manager=None) -> str:
@@ -110,9 +108,8 @@ def edit_file(path: str, edits: list, undo_manager=None) -> str:
     diff_text = generate_diff(original_content, modified_content, path)
 
     # Display the diff with colors
-    console = Console()
-    console.print("\n[bold cyan]📝 Proposed Changes:[/bold cyan]")
-    _display_colored_diff(console, diff_text)
+    ui.print("\n[bold cyan]📝 Proposed Changes:[/bold cyan]")
+    ui.print_diff(diff_text)
 
     # Checkpoint before writing (undo system)
     if undo_manager:
@@ -156,21 +153,3 @@ def generate_diff(original: str, modified: str, filename: str = "file") -> str:
     return "".join(diff)
 
 
-def _display_colored_diff(console: Console, diff_text: str) -> None:
-    """Display a diff with red/green coloring using Rich."""
-    if not diff_text.strip():
-        console.print("[dim]  (no differences)[/dim]")
-        return
-
-    for line in diff_text.splitlines():
-        if line.startswith("+++") or line.startswith("---"):
-            console.print(f"[bold white]{line}[/bold white]")
-        elif line.startswith("@@"):
-            console.print(f"[cyan]{line}[/cyan]")
-        elif line.startswith("+"):
-            console.print(f"[green]{line}[/green]")
-        elif line.startswith("-"):
-            console.print(f"[red]{line}[/red]")
-        else:
-            console.print(f"[dim]{line}[/dim]")
-    console.print()

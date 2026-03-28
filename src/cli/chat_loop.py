@@ -11,12 +11,13 @@ from src.context.token_manager import TokenManager
 from src.context.project_config import ProjectConfig
 from src.tools.undo import UndoManager
 from src.tools.linter import run_linter
+from src.ui.rich_ui import ui  # Feature 4.2 Rich UI
+import time
 
 
 class ChatLoop:
     def __init__(self, llm: BaseLLM, project_context: str = "", project_config: Optional[ProjectConfig] = None):
         self.llm = llm
-        self.console = Console()
         self.working_dir = os.getcwd()
         self.project_config = project_config or ProjectConfig()
 
@@ -78,26 +79,26 @@ class ChatLoop:
         return "\n".join(parts)
 
     def _handle_exit(self, signum, frame):
-        self.console.print("\n[bold red]Exiting gracefully...[/bold red]")
+        ui.print("\n[bold red]Exiting gracefully...[/bold red]")
         sys.exit(0)
 
     def _display_welcome(self):
-        self.console.print("[bold cyan]Welcome to Lord Code![/bold cyan]")
-        self.console.print(f"Current Model: [bold green]{self.llm.model}[/bold green]")
-        self.console.print(f"Working Directory: [bold blue]{self.working_dir}[/bold blue]")
+        ui.print("[bold cyan]Welcome to Lord Code![/bold cyan]")
+        ui.print(f"Current Model: [bold green]{self.llm.model}[/bold green]")
+        ui.print(f"Working Directory: [bold blue]{self.working_dir}[/bold blue]")
         
         # Show context usage
         sys_tokens = self.token_manager.count_message_tokens(self.messages)
         budget = self.token_manager.get_budget()
-        self.console.print(f"Context: [dim]{sys_tokens:,} / {budget['context_limit']:,} tokens used[/dim]")
+        ui.print(f"Context: [dim]{sys_tokens:,} / {budget['context_limit']:,} tokens used[/dim]")
         
-        self.console.print("Type [bold yellow]/exit[/bold yellow] or [bold yellow]/quit[/bold yellow] to leave.")
-        self.console.print(
+        ui.print("Type [bold yellow]/exit[/bold yellow] or [bold yellow]/quit[/bold yellow] to leave.")
+        ui.print(
             "Commands: [green]/models[/green], [green]/model <id>[/green], "
             "[green]/reasoning-on[/green], [green]/reasoning-off[/green], "
             "[green]/context[/green], [green]/undo[/green], [green]/changes[/green]"
         )
-        self.console.print("-" * 50)
+        ui.print("-" * 50)
 
     def run(self):
         self._display_welcome()
@@ -118,12 +119,12 @@ class ChatLoop:
 
                 # ── Slash Commands ──
                 if user_input == "/models":
-                    self.console.print("[bold cyan]Available Models:[/bold cyan]")
+                    ui.print("[bold cyan]Available Models:[/bold cyan]")
                     for m in Config.AVAILABLE_MODELS:
                         star = "*" if m == self.llm.model else " "
                         reasoning_opt = "[reasoning]" if m in Config.REASONING_MODELS else ""
                         ctx = Config.MODEL_CONTEXT_LIMITS.get(m, "?")
-                        self.console.print(f" {star} {m} {reasoning_opt} ({ctx:,} ctx)")
+                        ui.print(f" {star} {m} {reasoning_opt} ({ctx:,} ctx)")
                     continue
                 
                 if user_input.startswith("/model "):
@@ -132,26 +133,26 @@ class ChatLoop:
                         from src.llm.groq.factory import get_llm_client
                         self.llm = get_llm_client(new_model)
                         self.token_manager.update_model(new_model)
-                        self.console.print(f"[bold green]Switched to model: {new_model}[/bold green]")
+                        ui.print(f"[bold green]Switched to model: {new_model}[/bold green]")
                         if new_model not in Config.REASONING_MODELS and self.reasoning_enabled:
                             self.reasoning_enabled = False
-                            self.console.print("[bold yellow]Note: Reasoning mode disabled as it's not recommended for this model.[/bold yellow]")
+                            ui.print("[bold yellow]Note: Reasoning mode disabled as it's not recommended for this model.[/bold yellow]")
                     else:
-                        self.console.print(f"[bold red]Error: Model '{new_model}' not found in available models.[/bold red]")
+                        ui.print(f"[bold red]Error: Model '{new_model}' not found in available models.[/bold red]")
                     continue
 
                 if user_input == "/reasoning-on":
                     if self.llm.model in Config.REASONING_MODELS:
                         self.reasoning_enabled = True
-                        self.console.print("[bold green]Reasoning mode enabled.[/bold green]")
+                        ui.print("[bold green]Reasoning mode enabled.[/bold green]")
                     else:
-                        self.console.print(f"[bold yellow]Warning: Reasoning is not explicitly optimized for {self.llm.model}, but enabling anyway.[/bold yellow]")
+                        ui.print(f"[bold yellow]Warning: Reasoning is not explicitly optimized for {self.llm.model}, but enabling anyway.[/bold yellow]")
                         self.reasoning_enabled = True
                     continue
 
                 if user_input == "/reasoning-off":
                     self.reasoning_enabled = False
-                    self.console.print("[bold yellow]Reasoning mode disabled.[/bold yellow]")
+                    ui.print("[bold yellow]Reasoning mode disabled.[/bold yellow]")
                     continue
 
                 if user_input == "/context":
@@ -161,13 +162,13 @@ class ChatLoop:
                 # ── Undo Command (Feature 3.5) ──
                 if user_input == "/undo":
                     result = self.undo_manager.undo_last()
-                    self.console.print(f"\n[bold cyan]Undo:[/bold cyan]\n{result}\n")
+                    ui.print(f"\n[bold cyan]Undo:[/bold cyan]\n{result}\n")
                     continue
 
                 # ── Change Log Command (Feature 3.5) ──
                 if user_input == "/changes":
                     log = self.undo_manager.get_change_log()
-                    self.console.print(f"\n[bold cyan]{log}[/bold cyan]\n")
+                    ui.print(f"\n[bold cyan]{log}[/bold cyan]\n")
                     continue
 
                 # ── Process User Message ──
@@ -178,9 +179,9 @@ class ChatLoop:
 
                 # Check if summarization is needed before sending to LLM
                 if self.token_manager.should_summarize(self.messages):
-                    self.console.print("[dim yellow]⚡ Context getting large — summarizing older messages...[/dim yellow]")
+                    ui.print("[dim yellow]⚡ Context getting large — summarizing older messages...[/dim yellow]")
                     self.messages = self.token_manager.summarize_messages(self.messages, self.llm)
-                    self.console.print("[dim green]✓ Context summarized successfully.[/dim green]")
+                    ui.print("[dim green]✓ Context summarized successfully.[/dim green]")
 
                 # Begin an undo turn for this AI response
                 self.undo_manager.begin_turn("AI edit")
@@ -194,7 +195,7 @@ class ChatLoop:
                 if last_turn_tokens:
                     conv_tokens = self.token_manager.get_conversation_tokens(self.messages)
                     budget = self.token_manager.get_budget()
-                    self.console.print(
+                    ui.print(
                         f"\n[dim magenta]Turn: {last_turn_tokens['total']} tokens "
                         f"(P: {last_turn_tokens.get('prompt', 0)}, C: {last_turn_tokens.get('completion', 0)}) "
                         f"| Context: {conv_tokens:,}/{budget['conversation']:,}[/dim magenta]"
@@ -206,7 +207,7 @@ class ChatLoop:
             except EOFError:
                 self._handle_exit(None, None)
             except Exception as e:
-                self.console.print(f"[bold red]Error:[/bold red] {str(e)}")
+                ui.print(f"[bold red]Error:[/bold red] {str(e)}")
 
     def _display_context_info(self):
         """Display current token budget breakdown."""
@@ -217,23 +218,23 @@ class ChatLoop:
         conv_tokens = self.token_manager.get_conversation_tokens(self.messages)
         total_used = sys_tokens + conv_tokens
 
-        self.console.print("\n[bold cyan]📊 Context Window Status[/bold cyan]")
-        self.console.print(f"  Model:          {budget['model']}")
-        self.console.print(f"  Context Limit:  {budget['context_limit']:,} tokens")
-        self.console.print(f"  System Prompt:  {sys_tokens:,} / {budget['system_prompt']:,} tokens")
-        self.console.print(f"  Conversation:   {conv_tokens:,} / {budget['conversation']:,} tokens")
-        self.console.print(f"  Total Used:     {total_used:,} / {budget['context_limit']:,} tokens")
-        self.console.print(f"  Summarize At:   {budget['summarize_at']:,} tokens")
-        self.console.print(f"  Messages:       {len(self.messages)}")
+        ui.print("\n[bold cyan]📊 Context Window Status[/bold cyan]")
+        ui.print(f"  Model:          {budget['model']}")
+        ui.print(f"  Context Limit:  {budget['context_limit']:,} tokens")
+        ui.print(f"  System Prompt:  {sys_tokens:,} / {budget['system_prompt']:,} tokens")
+        ui.print(f"  Conversation:   {conv_tokens:,} / {budget['conversation']:,} tokens")
+        ui.print(f"  Total Used:     {total_used:,} / {budget['context_limit']:,} tokens")
+        ui.print(f"  Summarize At:   {budget['summarize_at']:,} tokens")
+        ui.print(f"  Messages:       {len(self.messages)}")
         
         pct = (total_used / budget['context_limit']) * 100
         if pct > 80:
-            self.console.print(f"  [bold red]⚠️  {pct:.1f}% used — summarization imminent[/bold red]")
+            ui.print(f"  [bold red]⚠️  {pct:.1f}% used — summarization imminent[/bold red]")
         elif pct > 50:
-            self.console.print(f"  [yellow]📈 {pct:.1f}% used[/yellow]")
+            ui.print(f"  [yellow]📈 {pct:.1f}% used[/yellow]")
         else:
-            self.console.print(f"  [green]✓ {pct:.1f}% used[/green]")
-        self.console.print()
+            ui.print(f"  [green]✓ {pct:.1f}% used[/green]")
+        ui.print()
 
     def _run_lint_after_edit(self, file_path: str) -> None:
         """
@@ -246,12 +247,12 @@ class ChatLoop:
 
         if lint_result.success:
             fix_note = " (auto-fixed)" if lint_result.auto_fixed else ""
-            self.console.print(f"  [green]✓ Lint passed ({lint_result.linter_name}){fix_note}[/green]")
+            ui.print(f"  [green]✓ Lint passed ({lint_result.linter_name}){fix_note}[/green]")
         else:
-            self.console.print(f"  [yellow]⚠ Lint errors ({lint_result.linter_name}):[/yellow]")
+            ui.print(f"  [yellow]⚠ Lint errors ({lint_result.linter_name}):[/yellow]")
             # Truncate for display
             display_output = lint_result.output[:500]
-            self.console.print(f"  [dim]{display_output}[/dim]")
+            ui.print(f"  [dim]{display_output}[/dim]")
             
             # Feed errors back to the LLM as a system message
             self.messages.append({
@@ -262,21 +263,29 @@ class ChatLoop:
                     f"Please fix these lint issues."
                 ),
             })
-            self.console.print(f"  [yellow]→ Feeding lint errors back to AI for correction...[/yellow]")
+            ui.print(f"  [yellow]→ Feeding lint errors back to AI for correction...[/yellow]")
 
     def _process_ai_response(self, tools, handlers) -> dict:
         import json
         from src.cli.safety import is_command_safe, is_path_safe, needs_confirmation
         
-        self.console.print("\n[bold magenta]AI:[/bold magenta]", end=" ")
+        ui.print("\n[bold magenta]AI:[/bold magenta]", end=" ")
         
         full_response = ""
         tool_calls = []
         usage = None
         root_dir = self.working_dir
         
-        with Live(Markdown(""), console=self.console, refresh_per_second=10) as live:
-            for chunk in self.llm.chat(self.messages, stream=True, reasoning=self.reasoning_enabled, tools=tools):
+        ui.start_spinner(f"AI is thinking...")
+        
+        with ui.live_markdown() as live:
+            it = self.llm.chat(self.messages, stream=True, reasoning=self.reasoning_enabled, tools=tools)
+            
+            # Start streaming
+            for chunk in it:
+                # Stop spinner on first chunk
+                ui.stop_spinner()
+                
                 # Handle usage (if include_usage=True, it's often in the last chunk)
                 if hasattr(chunk, 'usage') and chunk.usage:
                     usage = {
@@ -292,6 +301,7 @@ class ChatLoop:
                 if delta.content:
                     full_response += delta.content
                     live.update(Markdown(full_response))
+                    live.refresh()
                 
                 # Handle tool calls
                 if delta.tool_calls:
@@ -305,9 +315,12 @@ class ChatLoop:
                         if tc_delta.function.arguments:
                             tool_calls[tc_delta.index]["function"]["arguments"] += tc_delta.function.arguments
 
+        # Graceful spinner cleanup if no chunks were yielded
+        ui.stop_spinner()
+
         if full_response:
             self.messages.append({"role": "assistant", "content": full_response})
-            self.console.print()
+            ui.print()
 
         if tool_calls:
             self.messages.append({
@@ -324,31 +337,33 @@ class ChatLoop:
                 if name == "execute_command":
                     cmd = args.get("command", "")
                     if not is_command_safe(cmd):
-                        self.console.print(f"[bold red]Blocked dangerous command:[/bold red] {cmd}")
+                        ui.print(f"[bold red]Blocked dangerous command:[/bold red] {cmd}")
                         self._add_tool_result(tc["id"], name, "Error: Command was blocked for safety.")
                         continue
                 
                 if "path" in args:
                     if not is_path_safe(args["path"], root_dir):
-                        self.console.print(f"[bold red]Blocked out-of-bounds path:[/bold red] {args['path']}")
+                        ui.print(f"[bold red]Blocked out-of-bounds path:[/bold red] {args['path']}")
                         self._add_tool_result(tc["id"], name, "Error: Path access restricted to project directory.")
                         continue
 
                 # Confirmation for destructive actions
                 if needs_confirmation(name):
-                    self.console.print(f"\n[bold yellow]Safety Check:[/bold yellow] AI wants to run {name}({args})")
+                    ui.print(f"\n[bold yellow]Safety Check:[/bold yellow] AI wants to run {name}({args})")
                     confirm = input("Approve? (y/n): ").strip().lower()
                     if confirm != 'y':
-                        self.console.print("[bold yellow]Tool execution cancelled by user.[/bold yellow]")
+                        ui.print("[bold yellow]Tool execution cancelled by user.[/bold yellow]")
                         self._add_tool_result(tc["id"], name, "Error: User denied permission for this action.")
                         continue
 
-                self.console.print(f"[bold blue]Executing Tool:[/bold blue] {name}({args})")
+                ui.print_tool_call(name, args)
+                ui.start_spinner(f"Executing {name}...")
+                
                 handler = handlers.get(name)
                 result = handler(**args) if handler else f"Error: Tool {name} not found."
                 
-                display_result = result[:500] + "..." if len(result) > 500 else result
-                self.console.print(f"[bold green]Tool Result:[/bold green]\n{display_result}")
+                ui.stop_spinner()
+                ui.print_tool_result(result, name)
                 self._add_tool_result(tc["id"], name, result)
 
                 # ── Auto-Lint after file edits (Feature 3.2) ──
@@ -361,12 +376,12 @@ class ChatLoop:
                 if name == "run_tests" and "FAILED" in result:
                     self._test_retry_count += 1
                     if self._test_retry_count < self._max_test_retries:
-                        self.console.print(
+                        ui.print(
                             f"  [yellow]⚠ Tests failed (attempt {self._test_retry_count}/{self._max_test_retries})"
                             f" — AI will attempt to fix...[/yellow]"
                         )
                     else:
-                        self.console.print(
+                        ui.print(
                             f"  [bold red]✖ Max test retries ({self._max_test_retries}) reached. "
                             f"Manual intervention needed.[/bold red]"
                         )
