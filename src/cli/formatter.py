@@ -129,16 +129,8 @@ class OutputManager:
     # Welcome & session
     # -----------------------------------------------------------------
 
-    def display_welcome(
-        self,
-        version: str,
-        model: str,
-        provider: str,
-        mode: str,
-        project_dir: str,
-        project_type: str = "Unknown",
-    ) -> None:
-        """Display the welcome banner."""
+    def display_logo(self) -> None:
+        """Display the large ASCII welcome logo."""
         LOGO = """
 ██╗      ██████╗ ██████╗ ██████╗ 
 ██║     ██╔═══██╗██╔══██╗██╔══██╗
@@ -155,6 +147,17 @@ class OutputManager:
 """
         # Print the large aesthetic logo
         self._console.print(f"[#E27B61]{LOGO}[/#E27B61]")
+
+    def display_session_info(
+        self,
+        version: str,
+        model: str,
+        provider: str,
+        mode: str,
+        project_dir: str,
+        project_type: str = "Unknown",
+    ) -> None:
+        """Display the session info block."""
 
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column(style="bold cyan")

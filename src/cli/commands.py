@@ -164,7 +164,8 @@ class CommandHandler:
 
     async def _display_providers(self) -> None:
         from src.config import SUPPORTED_PROVIDERS
-        from prompt_toolkit.shortcuts import radiolist_dialog
+        import questionary
+        from questionary import Choice
         import os
 
         # Show provider table with defaults and status
@@ -177,7 +178,7 @@ class CommandHandler:
         }
 
         current = self._provider.current_provider_name
-        values = []
+        choices = []
 
         for name in SUPPORTED_PROVIDERS:
             default_model, key_env = provider_defaults.get(name, ("unknown", "unknown"))
@@ -189,16 +190,15 @@ class CommandHandler:
                 key_status = "✓ key set" if os.environ.get(key_env) else "✗ key missing"
 
             display_text = f"{name:<12} | {default_model:<28} | {key_status}"
-            values.append((name, display_text))
+            choices.append(Choice(display_text, name))
 
         try:
-            # Show interactive dialog
-            result = await radiolist_dialog(
-                title="Select LLM Provider",
-                text="Use arrow keys to select, Space to mark, Enter to confirm/cancel:",
-                values=values,
+            # Show interactive dialog inline
+            result = await questionary.select(
+                "Select LLM Provider:",
+                choices=choices,
                 default=current,
-            ).run_async()
+            ).ask_async()
 
             # If user selected an item and hit ok (result is not None)
             if result:

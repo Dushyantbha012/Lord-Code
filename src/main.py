@@ -48,6 +48,33 @@ async def main_loop(
     # Initialize output first (needed for error display)
     output = OutputManager(theme=config.display.theme)
 
+    # Display the large ASCII logo at the very top
+    output.display_logo()
+
+    # If mode wasn't explicitly provided, prompt for it
+    if mode is None:
+        import questionary
+        from questionary import Choice
+        
+        try:
+            mode_choice = await questionary.select(
+                "How should Lord-Code handle tool execution?",
+                choices=[
+                    Choice("Paranoid : Confirm every tool call (including reads)", "paranoid"),
+                    Choice("Smart    : Auto-approve reads, confirm writes & commands (default)", "smart"),
+                    Choice("YOLO     : Auto-approve everything (blocklist still active)", "yolo"),
+                ],
+                default="smart",
+            ).ask_async()
+            
+            if mode_choice:
+                config.safety.mode = mode_choice
+            else:
+                # User pressed cancel or Ctrl+C
+                sys.exit(0)
+        except Exception:
+            sys.exit(0)
+
     # Initialize provider manager
     try:
         provider_manager = ProviderManager(config)
@@ -84,9 +111,9 @@ async def main_loop(
         config=config,
     )
 
-    # Show welcome
+    # Show session info table
     project_type = _detect_project_type(Path(config.working_directory))
-    output.display_welcome(
+    output.display_session_info(
         version=VERSION,
         model=provider_manager.current.model_name,
         provider=provider_manager.current_provider_name,
