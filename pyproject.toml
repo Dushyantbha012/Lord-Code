@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lord-code"
+version = "0.1.0"
+description = "AI Coding Agent - Lord Code"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "prompt_toolkit>=3.0.0",
+    "rich>=13.0.0",
+    "click>=8.0.0",
+]
+
+[project.scripts]
+lord-code = "src.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
