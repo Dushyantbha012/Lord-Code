@@ -29,4 +29,13 @@ def is_path_safe(path: str, root_dir: str) -> bool:
     return abs_path.startswith(abs_root)
 
 def needs_confirmation(tool_name: str) -> bool:
-    return tool_name in ["write_file", "execute_command"]
+    return tool_name in [
+        "write_file",
+        "edit_file",
+        "execute_command",
+        # Git write operations (Feature 3.4)
+        "git_commit",
+        "git_create_branch",
+        "git_stash",
+        "git_unstash",
+    ]

@@ -9,6 +9,8 @@ from src.llm.base import BaseLLM
 from src.config import Config
 from src.context.token_manager import TokenManager
 from src.context.project_config import ProjectConfig
+from src.tools.undo import UndoManager
+from src.tools.linter import run_linter
 
 
 class ChatLoop:
@@ -17,6 +19,9 @@ class ChatLoop:
         self.console = Console()
         self.working_dir = os.getcwd()
         self.project_config = project_config or ProjectConfig()
+
+        # ── Undo/Rollback System (Feature 3.5) ──
+        self.undo_manager = UndoManager(self.working_dir)
 
         # ── Build System Prompt with Project Context ──
         system_content = self._build_system_prompt(project_context)
@@ -31,6 +36,10 @@ class ChatLoop:
             token_budget=self.project_config.token_budget,
         )
 
+        # ── Test Retry Counter (Feature 3.3) ──
+        self._test_retry_count = 0
+        self._max_test_retries = 3
+
         # Handle Ctrl+C
         signal.signal(signal.SIGINT, self._handle_exit)
 
@@ -42,8 +51,17 @@ class ChatLoop:
             "Always assume relative paths are relative to this directory unless specified otherwise.",
             "",
             "You have access to tools for reading/writing files, executing commands, and searching code.",
-            "Use the most appropriate tool for each task. Prefer search_in_files and find_definition",
-            "over manual grep when looking for code patterns or definitions.",
+            "",
+            "## Tool Usage Guidelines",
+            "- **Editing files**: Always prefer `edit_file` over `write_file` when modifying existing files.",
+            "  `edit_file` uses search/replace blocks which is more efficient and safer.",
+            "  Only use `write_file` for creating brand new files.",
+            "- **Search**: Prefer `search_in_files` and `find_definition` over manual grep",
+            "  when looking for code patterns or definitions.",
+            "- **Testing**: After making code changes, use `run_tests` to verify correctness",
+            "  if the project has a test suite.",
+            "- **Git**: Use git tools (`git_commit`, `git_create_branch`, `git_status`, etc.)",
+            "  for version control operations instead of `execute_command`.",
             "",
         ]
 
@@ -77,14 +95,17 @@ class ChatLoop:
         self.console.print(
             "Commands: [green]/models[/green], [green]/model <id>[/green], "
             "[green]/reasoning-on[/green], [green]/reasoning-off[/green], "
-            "[green]/context[/green]"
+            "[green]/context[/green], [green]/undo[/green], [green]/changes[/green]"
         )
         self.console.print("-" * 50)
 
     def run(self):
         self._display_welcome()
         from src.tools.definitions import TOOLS
-        from src.tools.handlers import TOOL_HANDLERS
+        from src.tools.handlers import TOOL_HANDLERS, set_undo_manager
+        
+        # Inject undo manager into handlers
+        set_undo_manager(self.undo_manager)
         
         self.total_tokens = {"prompt": 0, "completion": 0, "total": 0}
 
@@ -137,8 +158,23 @@ class ChatLoop:
                     self._display_context_info()
                     continue
 
+                # ── Undo Command (Feature 3.5) ──
+                if user_input == "/undo":
+                    result = self.undo_manager.undo_last()
+                    self.console.print(f"\n[bold cyan]Undo:[/bold cyan]\n{result}\n")
+                    continue
+
+                # ── Change Log Command (Feature 3.5) ──
+                if user_input == "/changes":
+                    log = self.undo_manager.get_change_log()
+                    self.console.print(f"\n[bold cyan]{log}[/bold cyan]\n")
+                    continue
+
                 # ── Process User Message ──
                 self.messages.append({"role": "user", "content": user_input})
+
+                # Reset test retry counter for new user message
+                self._test_retry_count = 0
 
                 # Check if summarization is needed before sending to LLM
                 if self.token_manager.should_summarize(self.messages):
@@ -146,7 +182,13 @@ class ChatLoop:
                     self.messages = self.token_manager.summarize_messages(self.messages, self.llm)
                     self.console.print("[dim green]✓ Context summarized successfully.[/dim green]")
 
+                # Begin an undo turn for this AI response
+                self.undo_manager.begin_turn("AI edit")
+
                 last_turn_tokens = self._process_ai_response(TOOLS, TOOL_HANDLERS)
+
+                # End the undo turn
+                self.undo_manager.end_turn()
                 
                 # Display usage
                 if last_turn_tokens:
@@ -192,6 +234,35 @@ class ChatLoop:
         else:
             self.console.print(f"  [green]✓ {pct:.1f}% used[/green]")
         self.console.print()
+
+    def _run_lint_after_edit(self, file_path: str) -> None:
+        """
+        Automatic Linting (Feature 3.2).
+        Runs after write_file or edit_file to catch issues early.
+        """
+        lint_result = run_linter(file_path, self.working_dir)
+        if lint_result is None:
+            return  # No linter available for this file type
+
+        if lint_result.success:
+            fix_note = " (auto-fixed)" if lint_result.auto_fixed else ""
+            self.console.print(f"  [green]✓ Lint passed ({lint_result.linter_name}){fix_note}[/green]")
+        else:
+            self.console.print(f"  [yellow]⚠ Lint errors ({lint_result.linter_name}):[/yellow]")
+            # Truncate for display
+            display_output = lint_result.output[:500]
+            self.console.print(f"  [dim]{display_output}[/dim]")
+            
+            # Feed errors back to the LLM as a system message
+            self.messages.append({
+                "role": "user",
+                "content": (
+                    f"[SYSTEM — Auto-Lint] {lint_result.linter_name} reported errors in {file_path}:\n"
+                    f"{lint_result.output}\n\n"
+                    f"Please fix these lint issues."
+                ),
+            })
+            self.console.print(f"  [yellow]→ Feeding lint errors back to AI for correction...[/yellow]")
 
     def _process_ai_response(self, tools, handlers) -> dict:
         import json
@@ -279,7 +350,35 @@ class ChatLoop:
                 display_result = result[:500] + "..." if len(result) > 500 else result
                 self.console.print(f"[bold green]Tool Result:[/bold green]\n{display_result}")
                 self._add_tool_result(tc["id"], name, result)
-            
+
+                # ── Auto-Lint after file edits (Feature 3.2) ──
+                if name in ("write_file", "edit_file") and not result.startswith("Error"):
+                    file_path = args.get("path", "")
+                    if file_path:
+                        self._run_lint_after_edit(file_path)
+
+                # ── Test retry logic (Feature 3.3) ──
+                if name == "run_tests" and "FAILED" in result:
+                    self._test_retry_count += 1
+                    if self._test_retry_count < self._max_test_retries:
+                        self.console.print(
+                            f"  [yellow]⚠ Tests failed (attempt {self._test_retry_count}/{self._max_test_retries})"
+                            f" — AI will attempt to fix...[/yellow]"
+                        )
+                    else:
+                        self.console.print(
+                            f"  [bold red]✖ Max test retries ({self._max_test_retries}) reached. "
+                            f"Manual intervention needed.[/bold red]"
+                        )
+                        # Add a message to stop the LLM from retrying
+                        self.messages.append({
+                            "role": "user",
+                            "content": (
+                                "[SYSTEM] Maximum test retry limit reached. "
+                                "Stop attempting to fix and summarize the remaining failures for the user."
+                            ),
+                        })
+
             # Recurse and accumulate usage
             next_usage = self._process_ai_response(tools, handlers)
             if next_usage and usage:
