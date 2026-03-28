@@ -7,6 +7,7 @@ from rich.theme import Theme
 from rich.rule import Rule
 from rich.panel import Panel
 from rich.text import Text
+from rich.markdown import Markdown
 from rich import box
 
 from src.config import APP_NAME, APP_VERSION, APP_DESCRIPTION
@@ -121,7 +122,18 @@ def print_status(message: str):
     )
 
 def print_ai_message(message: str) -> None:
+    """Print the AI response as a rendered Markdown panel."""
+    md = Markdown(message)
+    
+    panel = Panel(
+        md,
+        title="[brand]✴ Lord Code[/brand]",
+        title_align="left",
+        border_style="brand",
+        padding=(1, 2),
+        box=box.ROUNDED
+    )
+    
     console.print()
-    prefix = Text(" ┃ ", style="brand")
-    console.print(prefix + Text(message))
+    console.print(panel)
     console.print()

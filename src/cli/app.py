@@ -8,6 +8,7 @@ from prompt_toolkit import PromptSession
 
 from src.config import EXIT_COMMANDS, SLASH_COMMANDS
 from src.cli.prompt import create_prompt_session
+from src.agent.agent import CodingAgent
 from src.cli.theme import (
     console,
     print_splash,
@@ -25,6 +26,7 @@ class CLIApp:
 
     def __init__(self) -> None:
         self.session = create_prompt_session()
+        self.agent = CodingAgent()
         self.running = True
 
     # ── Input Helpers ──────────────────────────────────────────────────
@@ -57,6 +59,7 @@ class CLIApp:
 
             if cmd == "/clear":
                 console.clear()
+                self.agent.clear_history()
                 print_banner()
                 return
 
@@ -106,11 +109,17 @@ class CLIApp:
                 self._handle_command(text)
                 continue
 
-            # Process AI Message (Placeholder simulation)
+            # Process AI Message (Actual LLM logic)
             with print_status("Thinking..."):
-                time.sleep(0.5)
-                # LLM logic coming soon!
-                response = f"I've received your request: '{text}'. Agent logic is being integrated."
-                print_ai_message(response)
+                try:
+                    response = self.agent.chat(text)
+                    if response.startswith("Error:"):
+                        from src.cli.theme import print_error
+                        print_error(response[6:].strip())
+                    else:
+                        print_ai_message(response)
+                except Exception as e:
+                    from src.cli.theme import print_error
+                    print_error(str(e))
 
         print_goodbye()
