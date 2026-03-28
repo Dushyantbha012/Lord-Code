@@ -139,6 +139,23 @@ class OutputManager:
         project_type: str = "Unknown",
     ) -> None:
         """Display the welcome banner."""
+        LOGO = """
+██╗      ██████╗ ██████╗ ██████╗ 
+██║     ██╔═══██╗██╔══██╗██╔══██╗
+██║     ██║   ██║██████╔╝██║  ██║
+██║     ██║   ██║██╔══██╗██║  ██║
+███████╗╚██████╔╝██║  ██║██████╔╝
+╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═════╝ 
+ ██████╗ ██████╗ ██████╗ ███████╗
+██╔════╝██╔═══██╗██╔══██╗██╔════╝
+██║     ██║   ██║██║  ██║█████╗  
+██║     ██║   ██║██║  ██║██╔══╝  
+╚██████╗╚██████╔╝██████╔╝███████╗
+ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝
+"""
+        # Print the large aesthetic logo
+        self._console.print(f"[#E27B61]{LOGO}[/#E27B61]")
+
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column(style="bold cyan")
         table.add_column()
@@ -153,9 +170,11 @@ class OutputManager:
         panel = Panel(
             table,
             border_style="cyan",
-            title="[bold cyan]Lord-Code[/bold cyan]",
+            title="[bold cyan]Session Info[/bold cyan]",
             subtitle="[dim]AI Coding Agent[/dim]",
+            expand=False,
         )
+        self._console.print()
         self._console.print(panel)
         self._console.print()
 

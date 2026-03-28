@@ -101,7 +101,7 @@ class CommandHandler:
             self._display_info()
 
         elif cmd == "/providers":
-            self._display_providers()
+            await self._display_providers()
 
         else:
             self._output.display_warning(
@@ -162,8 +162,10 @@ class CommandHandler:
             f"  Token usage: {self._agent.token_tracker.get_summary()}"
         )
 
-    def _display_providers(self) -> None:
+    async def _display_providers(self) -> None:
         from src.config import SUPPORTED_PROVIDERS
+        from prompt_toolkit.shortcuts import radiolist_dialog
+        import os
 
         # Show provider table with defaults and status
         provider_defaults = {
@@ -174,12 +176,11 @@ class CommandHandler:
             "ollama": ("llama3.1:8b", "(none — local)"),
         }
 
-        import os
-        lines = ["Available Providers:\n"]
         current = self._provider.current_provider_name
+        values = []
+
         for name in SUPPORTED_PROVIDERS:
             default_model, key_env = provider_defaults.get(name, ("unknown", "unknown"))
-            active = "  ✅ " if name == current else "     "
 
             # Check if API key is set
             if key_env.startswith("("):
@@ -187,8 +188,21 @@ class CommandHandler:
             else:
                 key_status = "✓ key set" if os.environ.get(key_env) else "✗ key missing"
 
-            lines.append(
-                f"{active}{name:<12} model: {default_model:<35} [{key_status}]"
-            )
+            display_text = f"{name:<12} | {default_model:<28} | {key_status}"
+            values.append((name, display_text))
 
-        self._output.display_info("\n".join(lines))
+        try:
+            # Show interactive dialog
+            result = await radiolist_dialog(
+                title="Select LLM Provider",
+                text="Use arrow keys to select, Space to mark, Enter to confirm/cancel:",
+                values=values,
+                default=current,
+            ).run_async()
+
+            # If user selected an item and hit ok (result is not None)
+            if result:
+                # Same as /provider <result>
+                self._handle_provider(result)
+        except Exception as e:
+            self._output.display_error(f"Could not open provider dialog: {e}")
