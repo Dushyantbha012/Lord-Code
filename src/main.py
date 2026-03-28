@@ -14,7 +14,12 @@ def main():
         
     llm = GroqGPTOSS120BClient()
     chat = ChatLoop(llm)
-    chat.run()
+    try:
+        chat.run()
+    finally:
+        if hasattr(chat, 'total_tokens') and chat.total_tokens['total'] > 0:
+            print(f"\nSession Total: {chat.total_tokens['total']} tokens "
+                  f"(P: {chat.total_tokens['prompt']}, C: {chat.total_tokens['completion']})")
 
 if __name__ == "__main__":
     main()
