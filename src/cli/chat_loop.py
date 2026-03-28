@@ -12,8 +12,9 @@ class ChatLoop:
     def __init__(self, llm: BaseLLM):
         self.llm = llm
         self.console = Console()
+        self.working_dir = os.getcwd()
         self.messages: List[Dict[str, str]] = [
-            {"role": "system", "content": "You are a helpful AI assistant."}
+            {"role": "system", "content": f"You are a helpful AI assistant. Your working directory is {self.working_dir}. Always assume relative paths are relative to this directory unless specified otherwise."}
         ]
         self.reasoning_enabled = False
         
@@ -27,6 +28,7 @@ class ChatLoop:
     def _display_welcome(self):
         self.console.print("[bold cyan]Welcome to the CLI Chat Loop![/bold cyan]")
         self.console.print(f"Current Model: [bold green]{self.llm.model}[/bold green]")
+        self.console.print(f"Working Directory: [bold blue]{self.working_dir}[/bold blue]")
         self.console.print("Type [bold yellow]/exit[/bold yellow] or [bold yellow]/quit[/bold yellow] to leave.")
         self.console.print("Commands: [green]/models[/green], [green]/model <id>[/green], [green]/reasoning-on[/green], [green]/reasoning-off[/green]")
         self.console.print("-" * 50)
@@ -98,7 +100,7 @@ class ChatLoop:
         full_response = ""
         tool_calls = []
         usage = None
-        root_dir = os.getcwd()
+        root_dir = self.working_dir
         
         with Live(Markdown(""), console=self.console, refresh_per_second=10) as live:
             for chunk in self.llm.chat(self.messages, stream=True, reasoning=self.reasoning_enabled, tools=tools):
