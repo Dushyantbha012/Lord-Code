@@ -19,6 +19,13 @@ from dotenv import load_dotenv
 
 
 # ---------------------------------------------------------------------------
+# Supported providers list
+# ---------------------------------------------------------------------------
+
+SUPPORTED_PROVIDERS = ["groq", "openai", "anthropic", "gemini", "ollama"]
+
+
+# ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
 
@@ -27,6 +34,42 @@ from dotenv import load_dotenv
 class GroqConfig:
     model: str = "llama-3.3-70b-versatile"
     api_key_env: str = "GROQ_API_KEY"
+    max_tokens: int = 4096
+    temperature: float = 0.0
+
+    @property
+    def api_key(self) -> Optional[str]:
+        return os.environ.get(self.api_key_env)
+
+
+@dataclass
+class OpenAIConfig:
+    model: str = "gpt-4o-mini"
+    api_key_env: str = "OPENAI_API_KEY"
+    max_tokens: int = 4096
+    temperature: float = 0.0
+
+    @property
+    def api_key(self) -> Optional[str]:
+        return os.environ.get(self.api_key_env)
+
+
+@dataclass
+class AnthropicConfig:
+    model: str = "claude-sonnet-4-20250514"
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    max_tokens: int = 4096
+    temperature: float = 0.0
+
+    @property
+    def api_key(self) -> Optional[str]:
+        return os.environ.get(self.api_key_env)
+
+
+@dataclass
+class GeminiConfig:
+    model: str = "gemini-2.0-flash"
+    api_key_env: str = "GEMINI_API_KEY"
     max_tokens: int = 4096
     temperature: float = 0.0
 
@@ -47,6 +90,9 @@ class OllamaConfig:
 class LLMConfig:
     default_provider: str = "groq"
     groq: GroqConfig = field(default_factory=GroqConfig)
+    openai: OpenAIConfig = field(default_factory=OpenAIConfig)
+    anthropic: AnthropicConfig = field(default_factory=AnthropicConfig)
+    gemini: GeminiConfig = field(default_factory=GeminiConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
 
 
@@ -81,7 +127,8 @@ class Config:
 # ---------------------------------------------------------------------------
 
 
-def _merge_groq(cfg: GroqConfig, data: dict) -> None:
+def _merge_provider_config(cfg, data: dict) -> None:
+    """Generic merge for any provider config with standard fields."""
     if "model" in data:
         cfg.model = data["model"]
     if "api_key_env" in data:
@@ -90,26 +137,16 @@ def _merge_groq(cfg: GroqConfig, data: dict) -> None:
         cfg.max_tokens = int(data["max_tokens"])
     if "temperature" in data:
         cfg.temperature = float(data["temperature"])
-
-
-def _merge_ollama(cfg: OllamaConfig, data: dict) -> None:
-    if "model" in data:
-        cfg.model = data["model"]
-    if "base_url" in data:
+    if "base_url" in data and hasattr(cfg, "base_url"):
         cfg.base_url = data["base_url"]
-    if "max_tokens" in data:
-        cfg.max_tokens = int(data["max_tokens"])
-    if "temperature" in data:
-        cfg.temperature = float(data["temperature"])
 
 
 def _merge_llm(cfg: LLMConfig, data: dict) -> None:
     if "default_provider" in data:
         cfg.default_provider = data["default_provider"]
-    if "groq" in data:
-        _merge_groq(cfg.groq, data["groq"])
-    if "ollama" in data:
-        _merge_ollama(cfg.ollama, data["ollama"])
+    for provider in SUPPORTED_PROVIDERS:
+        if provider in data and hasattr(cfg, provider):
+            _merge_provider_config(getattr(cfg, provider), data[provider])
 
 
 def _merge_safety(cfg: SafetyConfig, data: dict) -> None:
@@ -150,6 +187,18 @@ def _load_toml_file(path: Path) -> dict:
         return tomllib.load(f)
 
 
+def _get_provider_config(cfg: Config, provider: str):
+    """Get the config object for a given provider name."""
+    return getattr(cfg.llm, provider, None)
+
+
+def _set_model_for_provider(cfg: Config, provider: str, model: str) -> None:
+    """Set the model on the given provider config."""
+    pcfg = _get_provider_config(cfg, provider)
+    if pcfg:
+        pcfg.model = model
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -176,7 +225,6 @@ def load_config(
     project_root = Path(cfg.working_directory)
     default_toml = project_root / "default_config.toml"
     if not default_toml.exists():
-        # Try relative to this source file (for installed packages)
         default_toml = Path(__file__).parent.parent / "default_config.toml"
     _merge_toml(cfg, _load_toml_file(default_toml))
 
@@ -192,11 +240,7 @@ def load_config(
     if os.environ.get("LORDCODE_PROVIDER"):
         cfg.llm.default_provider = os.environ["LORDCODE_PROVIDER"]
     if os.environ.get("LORDCODE_MODEL"):
-        # Set on whichever provider is active
-        if cfg.llm.default_provider == "groq":
-            cfg.llm.groq.model = os.environ["LORDCODE_MODEL"]
-        else:
-            cfg.llm.ollama.model = os.environ["LORDCODE_MODEL"]
+        _set_model_for_provider(cfg, cfg.llm.default_provider, os.environ["LORDCODE_MODEL"])
     if os.environ.get("LORDCODE_MODE"):
         cfg.safety.mode = os.environ["LORDCODE_MODE"]
 
@@ -204,10 +248,7 @@ def load_config(
     if provider:
         cfg.llm.default_provider = provider
     if model:
-        if cfg.llm.default_provider == "groq":
-            cfg.llm.groq.model = model
-        else:
-            cfg.llm.ollama.model = model
+        _set_model_for_provider(cfg, cfg.llm.default_provider, model)
     if mode:
         cfg.safety.mode = mode
     if no_stream:

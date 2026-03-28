@@ -112,9 +112,9 @@ async def main_loop(
 @click.command()
 @click.option(
     "-p", "--provider",
-    type=click.Choice(["groq", "ollama"], case_sensitive=False),
+    type=click.Choice(["groq", "openai", "anthropic", "gemini", "ollama"], case_sensitive=False),
     default=None,
-    help="LLM provider to use.",
+    help="LLM provider to use (groq, openai, anthropic, gemini, ollama).",
 )
 @click.option(
     "-m", "--model",

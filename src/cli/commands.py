@@ -19,8 +19,9 @@ COMMAND_DESCRIPTIONS = {
     "/exit, /quit": "End the session",
     "/clear": "Clear conversation history",
     "/mode <mode>": "Change safety mode (paranoid/smart/yolo)",
-    "/provider <name>": "Switch LLM provider (groq/ollama)",
+    "/provider <name>": "Switch LLM provider (groq/openai/anthropic/gemini/ollama)",
     "/model <name>": "Switch model on current provider",
+    "/providers": "List all available providers",
     "/cost": "Show token usage and cost",
     "/history": "Show condensed conversation history",
     "/retry": "Re-send the last user message",
@@ -99,6 +100,9 @@ class CommandHandler:
         elif cmd == "/info":
             self._display_info()
 
+        elif cmd == "/providers":
+            self._display_providers()
+
         else:
             self._output.display_warning(
                 f"Unknown command: {cmd}. Type /help for available commands."
@@ -118,7 +122,10 @@ class CommandHandler:
 
     def _handle_provider(self, arg: str) -> None:
         if not arg:
-            self._output.display_warning("Usage: /provider <groq|ollama>")
+            providers = ", ".join(self._provider.available_providers)
+            self._output.display_warning(
+                f"Usage: /provider <{providers}>"
+            )
             return None
         try:
             msg = self._provider.switch_provider(arg)
@@ -154,3 +161,34 @@ class CommandHandler:
             f"  Working dir: {self._config.working_directory}\n"
             f"  Token usage: {self._agent.token_tracker.get_summary()}"
         )
+
+    def _display_providers(self) -> None:
+        from src.config import SUPPORTED_PROVIDERS
+
+        # Show provider table with defaults and status
+        provider_defaults = {
+            "groq": ("llama-3.3-70b-versatile", "GROQ_API_KEY"),
+            "openai": ("gpt-4o-mini", "OPENAI_API_KEY"),
+            "anthropic": ("claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"),
+            "gemini": ("gemini-2.0-flash", "GEMINI_API_KEY"),
+            "ollama": ("llama3.1:8b", "(none — local)"),
+        }
+
+        import os
+        lines = ["Available Providers:\n"]
+        current = self._provider.current_provider_name
+        for name in SUPPORTED_PROVIDERS:
+            default_model, key_env = provider_defaults.get(name, ("unknown", "unknown"))
+            active = "  ✅ " if name == current else "     "
+
+            # Check if API key is set
+            if key_env.startswith("("):
+                key_status = "local"
+            else:
+                key_status = "✓ key set" if os.environ.get(key_env) else "✗ key missing"
+
+            lines.append(
+                f"{active}{name:<12} model: {default_model:<35} [{key_status}]"
+            )
+
+        self._output.display_info("\n".join(lines))

@@ -1,9 +1,29 @@
+# Lord-Code Default Configuration
+
 [llm]
 default_provider = "groq"
 
 [llm.groq]
 model = "llama-3.3-70b-versatile"
 api_key_env = "GROQ_API_KEY"
+max_tokens = 4096
+temperature = 0.0
+
+[llm.openai]
+model = "gpt-4o-mini"
+api_key_env = "OPENAI_API_KEY"
+max_tokens = 4096
+temperature = 0.0
+
+[llm.anthropic]
+model = "claude-sonnet-4-20250514"
+api_key_env = "ANTHROPIC_API_KEY"
+max_tokens = 4096
+temperature = 0.0
+
+[llm.gemini]
+model = "gemini-2.0-flash"
+api_key_env = "GEMINI_API_KEY"
 max_tokens = 4096
 temperature = 0.0
 

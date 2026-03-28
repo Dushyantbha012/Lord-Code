@@ -9,9 +9,9 @@ A terminal-based AI coding assistant powered by Groq's ultra-fast inference API.
 - ⚡ **Command Execution** — Run shell commands with safety guardrails
 - 🔄 **Agentic Loop** — Multi-step tool chains that self-correct on errors
 - 🛡️ **Tri-Mode Safety** — Paranoid, Smart, or YOLO modes for tool approval
-- 📡 **Streaming Responses** — Real-time token streaming from Groq
-- 💰 **Cost Tracking** — Token usage and cost estimation per session
-- 🔀 **Multi-Provider** — Switch between Groq and Ollama (local) on the fly
+- 📡 **Streaming Responses** — Real-time token streaming across supported providers
+- 💰 **Cost Tracking** — Token usage and cost estimation per session (with provider-specific pricing)
+- 🔀 **Multi-Provider** — Switch between Groq, OpenAI, Anthropic, Gemini, and Ollama (local) on the fly
 
 ## Quick Start
 
@@ -22,15 +22,26 @@ git clone https://github.com/your-repo/Lord-Code.git
 cd Lord-Code
 python3 -m venv .venv
 source .venv/bin/activate
-pip install groq openai rich prompt-toolkit click python-dotenv pathspec aiofiles
+# Using Poetry (recommended):
+poetry install
+# Or using pip:
+pip install groq openai anthropic google-genai rich prompt-toolkit click python-dotenv pathspec aiofiles
 ```
 
 ### 2. Set Up API Key
 
-Get a free Groq API key at [console.groq.com](https://console.groq.com).
+Get API keys for the providers you want to use:
+- **Groq** (Default, very fast): [console.groq.com](https://console.groq.com)
+- **OpenAI**: [platform.openai.com](https://platform.openai.com)
+- **Anthropic**: [console.anthropic.com](https://console.anthropic.com)
+- **Gemini**: [aistudio.google.com](https://aistudio.google.com)
 
 ```bash
-echo "GROQ_API_KEY=your-key-here" > .env
+# Add keys to your .env file
+echo "GROQ_API_KEY=your-key" >> .env
+echo "OPENAI_API_KEY=your-key" >> .env
+echo "ANTHROPIC_API_KEY=your-key" >> .env
+echo "GEMINI_API_KEY=your-key" >> .env
 ```
 
 ### 3. Run
@@ -64,7 +75,8 @@ The project contains the following structure...
 | `/exit` | End session |
 | `/clear` | Clear conversation history |
 | `/mode <paranoid\|smart\|yolo>` | Change safety mode |
-| `/provider <groq\|ollama>` | Switch LLM provider |
+| `/provider <name>` | Switch LLM provider (groq/openai/anthropic/gemini/ollama) |
+| `/providers` | List all available providers and your API key status |
 | `/model <name>` | Switch model |
 | `/cost` | Show token usage and cost |
 | `/history` | Show conversation history |
@@ -83,8 +95,10 @@ The project contains the following structure...
 
 ```bash
 python -m src.main --help
+python -m src.main --provider openai --model gpt-4o
 python -m src.main --provider ollama --model llama3.1:8b
 python -m src.main --mode yolo --no-stream
+
 python -m src.main -v  # verbose mode
 ```
 
@@ -100,8 +114,11 @@ src/
 │   └── commands.py      # Slash command handler
 ├── llm/
 │   ├── base.py          # Abstract adapter + types
-│   ├── groq_adapter.py  # Groq SDK adapter
-│   ├── ollama_adapter.py # Ollama (OpenAI-compat)
+│   ├── groq_adapter.py  # Groq SDK adapter (default)
+│   ├── openai_adapter.py # OpenAI ChatGPT adapter
+│   ├── anthropic_adapter.py # Anthropic Claude adapter
+│   ├── gemini_adapter.py # Google Gemini adapter
+│   ├── ollama_adapter.py # Ollama (local models)
 │   └── provider.py      # Provider manager
 ├── agent/
 │   ├── loop.py          # Core agentic loop

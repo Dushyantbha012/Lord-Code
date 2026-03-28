@@ -1,15 +1,15 @@
 """
 Provider Manager — Holds LLM adapters and supports runtime switching.
+
+Supports: groq (default), openai, anthropic, gemini, ollama
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from src.config import Config
+from src.config import Config, SUPPORTED_PROVIDERS
 from src.llm.base import LLMAdapter
-from src.llm.groq_adapter import GroqAdapter
-from src.llm.ollama_adapter import OllamaAdapter
 
 
 class ProviderManager:
@@ -29,6 +29,8 @@ class ProviderManager:
             return
 
         if provider == "groq":
+            from src.llm.groq_adapter import GroqAdapter
+
             api_key = self._config.llm.groq.api_key
             if not api_key:
                 raise RuntimeError(
@@ -41,15 +43,71 @@ class ProviderManager:
                 max_tokens=self._config.llm.groq.max_tokens,
                 temperature=self._config.llm.groq.temperature,
             )
+
+        elif provider == "openai":
+            from src.llm.openai_adapter import OpenAIAdapter
+
+            api_key = self._config.llm.openai.api_key
+            if not api_key:
+                raise RuntimeError(
+                    "OPENAI_API_KEY not found. Set it in your .env file.\n"
+                    "Get a key at: https://platform.openai.com/api-keys"
+                )
+            self._adapters["openai"] = OpenAIAdapter(
+                api_key=api_key,
+                model=self._config.llm.openai.model,
+                max_tokens=self._config.llm.openai.max_tokens,
+                temperature=self._config.llm.openai.temperature,
+            )
+
+        elif provider == "anthropic":
+            from src.llm.anthropic_adapter import AnthropicAdapter
+
+            api_key = self._config.llm.anthropic.api_key
+            if not api_key:
+                raise RuntimeError(
+                    "ANTHROPIC_API_KEY not found. Set it in your .env file.\n"
+                    "Get a key at: https://console.anthropic.com/settings/keys"
+                )
+            self._adapters["anthropic"] = AnthropicAdapter(
+                api_key=api_key,
+                model=self._config.llm.anthropic.model,
+                max_tokens=self._config.llm.anthropic.max_tokens,
+                temperature=self._config.llm.anthropic.temperature,
+            )
+
+        elif provider == "gemini":
+            from src.llm.gemini_adapter import GeminiAdapter
+
+            api_key = self._config.llm.gemini.api_key
+            if not api_key:
+                raise RuntimeError(
+                    "GEMINI_API_KEY not found. Set it in your .env file.\n"
+                    "Get a key at: https://aistudio.google.com/apikey"
+                )
+            self._adapters["gemini"] = GeminiAdapter(
+                api_key=api_key,
+                model=self._config.llm.gemini.model,
+                max_tokens=self._config.llm.gemini.max_tokens,
+                temperature=self._config.llm.gemini.temperature,
+            )
+
         elif provider == "ollama":
+            from src.llm.ollama_adapter import OllamaAdapter
+
             self._adapters["ollama"] = OllamaAdapter(
                 model=self._config.llm.ollama.model,
                 base_url=self._config.llm.ollama.base_url,
                 max_tokens=self._config.llm.ollama.max_tokens,
                 temperature=self._config.llm.ollama.temperature,
             )
+
         else:
-            raise ValueError(f"Unknown provider: {provider}. Use 'groq' or 'ollama'.")
+            providers = ", ".join(SUPPORTED_PROVIDERS)
+            raise ValueError(
+                f"Unknown provider: '{provider}'. "
+                f"Supported providers: {providers}"
+            )
 
     @property
     def current(self) -> LLMAdapter:
@@ -59,6 +117,11 @@ class ProviderManager:
     @property
     def current_provider_name(self) -> str:
         return self._current_provider
+
+    @property
+    def available_providers(self) -> list[str]:
+        """Return list of supported provider names."""
+        return SUPPORTED_PROVIDERS.copy()
 
     def switch_provider(self, provider: str) -> str:
         """Switch to a different provider. Returns confirmation message."""
