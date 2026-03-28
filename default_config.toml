@@ -1,0 +1,25 @@
+[llm]
+default_provider = "groq"
+
+[llm.groq]
+model = "llama-3.3-70b-versatile"
+api_key_env = "GROQ_API_KEY"
+max_tokens = 4096
+temperature = 0.0
+
+[llm.ollama]
+model = "llama3.1:8b"
+base_url = "http://localhost:11434"
+max_tokens = 4096
+temperature = 0.0
+
+[safety]
+mode = "smart"
+max_loop_iterations = 25
+command_timeout_seconds = 30
+
+[display]
+stream = true
+show_tool_calls = true
+show_token_usage = true
+theme = "monokai"

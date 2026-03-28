@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "lord-code"
+version = "0.1.0"
+description = "AI Coding Agent - A terminal-based intelligent coding assistant"
+authors = ["Kanishk Raghav"]
+readme = "readme.md"
+packages = [{include = "src"}]
+
+[tool.poetry.scripts]
+lordcode = "src.main:cli"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+groq = ">=0.11.0"
+openai = ">=1.0.0"
+rich = ">=13.0.0"
+prompt-toolkit = ">=3.0.0"
+click = ">=8.0.0"
+python-dotenv = ">=1.0.0"
+pathspec = ">=0.11.0"
+aiofiles = ">=23.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0.0"
+pytest-asyncio = ">=0.21.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
