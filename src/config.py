@@ -26,7 +26,24 @@ class Config:
     ]
     
     REASONING_MODEL_SUFFIX = "-reasoning"
-    
+
+    # ── Context Window Limits (per model) ──
+    MODEL_CONTEXT_LIMITS = {
+        "openai/gpt-oss-120b": 128_000,
+        "openai/gpt-oss-20b": 128_000,
+        "llama-3.3-70b-versatile": 131_072,
+        "llama-3.1-8b-instant": 131_072,
+        "groq/compound": 131_072,
+        "groq/compound-mini": 131_072,
+    }
+
+    # ── Default Token Budget ──
+    DEFAULT_TOKEN_BUDGET = {
+        "system_prompt": 2500,
+        "file_contents": 5000,
+        "conversation": "auto",  # auto = context_limit - system - files - 4096 headroom
+    }
+
     @classmethod
     def validate(cls):
         from rich.console import Console

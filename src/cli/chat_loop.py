@@ -1,36 +1,84 @@
 import sys
 import signal
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.live import Live
 from src.llm.base import BaseLLM
 from src.config import Config
+from src.context.token_manager import TokenManager
+from src.context.project_config import ProjectConfig
+
 
 class ChatLoop:
-    def __init__(self, llm: BaseLLM):
+    def __init__(self, llm: BaseLLM, project_context: str = "", project_config: Optional[ProjectConfig] = None):
         self.llm = llm
         self.console = Console()
         self.working_dir = os.getcwd()
+        self.project_config = project_config or ProjectConfig()
+
+        # ── Build System Prompt with Project Context ──
+        system_content = self._build_system_prompt(project_context)
         self.messages: List[Dict[str, str]] = [
-            {"role": "system", "content": f"You are a helpful AI assistant. Your working directory is {self.working_dir}. Always assume relative paths are relative to this directory unless specified otherwise."}
+            {"role": "system", "content": system_content}
         ]
         self.reasoning_enabled = False
-        
+
+        # ── Token Manager (Feature 2.3) ──
+        self.token_manager = TokenManager(
+            model=getattr(llm, 'model', Config.DEFAULT_MODEL),
+            token_budget=self.project_config.token_budget,
+        )
+
         # Handle Ctrl+C
         signal.signal(signal.SIGINT, self._handle_exit)
+
+    def _build_system_prompt(self, project_context: str) -> str:
+        """Build a rich system prompt with project context and instructions."""
+        parts = [
+            "You are Lord Code, a powerful AI coding assistant that lives in the terminal.",
+            f"Your working directory is: {self.working_dir}",
+            "Always assume relative paths are relative to this directory unless specified otherwise.",
+            "",
+            "You have access to tools for reading/writing files, executing commands, and searching code.",
+            "Use the most appropriate tool for each task. Prefer search_in_files and find_definition",
+            "over manual grep when looking for code patterns or definitions.",
+            "",
+        ]
+
+        if project_context:
+            parts.append("## Project Context (auto-gathered)")
+            parts.append(project_context)
+            parts.append("")
+
+        if self.project_config.custom_instructions:
+            parts.append("## Custom Instructions")
+            parts.append(self.project_config.custom_instructions)
+            parts.append("")
+
+        return "\n".join(parts)
 
     def _handle_exit(self, signum, frame):
         self.console.print("\n[bold red]Exiting gracefully...[/bold red]")
         sys.exit(0)
 
     def _display_welcome(self):
-        self.console.print("[bold cyan]Welcome to the CLI Chat Loop![/bold cyan]")
+        self.console.print("[bold cyan]Welcome to Lord Code![/bold cyan]")
         self.console.print(f"Current Model: [bold green]{self.llm.model}[/bold green]")
         self.console.print(f"Working Directory: [bold blue]{self.working_dir}[/bold blue]")
+        
+        # Show context usage
+        sys_tokens = self.token_manager.count_message_tokens(self.messages)
+        budget = self.token_manager.get_budget()
+        self.console.print(f"Context: [dim]{sys_tokens:,} / {budget['context_limit']:,} tokens used[/dim]")
+        
         self.console.print("Type [bold yellow]/exit[/bold yellow] or [bold yellow]/quit[/bold yellow] to leave.")
-        self.console.print("Commands: [green]/models[/green], [green]/model <id>[/green], [green]/reasoning-on[/green], [green]/reasoning-off[/green]")
+        self.console.print(
+            "Commands: [green]/models[/green], [green]/model <id>[/green], "
+            "[green]/reasoning-on[/green], [green]/reasoning-off[/green], "
+            "[green]/context[/green]"
+        )
         self.console.print("-" * 50)
 
     def run(self):
@@ -44,12 +92,17 @@ class ChatLoop:
             try:
                 user_input = input("You: ").strip()
                 if not user_input: continue
+                if user_input in ("/exit", "/quit"):
+                    self._handle_exit(None, None)
+
+                # ── Slash Commands ──
                 if user_input == "/models":
                     self.console.print("[bold cyan]Available Models:[/bold cyan]")
                     for m in Config.AVAILABLE_MODELS:
                         star = "*" if m == self.llm.model else " "
                         reasoning_opt = "[reasoning]" if m in Config.REASONING_MODELS else ""
-                        self.console.print(f" {star} {m} {reasoning_opt}")
+                        ctx = Config.MODEL_CONTEXT_LIMITS.get(m, "?")
+                        self.console.print(f" {star} {m} {reasoning_opt} ({ctx:,} ctx)")
                     continue
                 
                 if user_input.startswith("/model "):
@@ -57,6 +110,7 @@ class ChatLoop:
                     if new_model in Config.AVAILABLE_MODELS:
                         from src.llm.groq.factory import get_llm_client
                         self.llm = get_llm_client(new_model)
+                        self.token_manager.update_model(new_model)
                         self.console.print(f"[bold green]Switched to model: {new_model}[/bold green]")
                         if new_model not in Config.REASONING_MODELS and self.reasoning_enabled:
                             self.reasoning_enabled = False
@@ -73,15 +127,36 @@ class ChatLoop:
                         self.console.print(f"[bold yellow]Warning: Reasoning is not explicitly optimized for {self.llm.model}, but enabling anyway.[/bold yellow]")
                         self.reasoning_enabled = True
                     continue
-                if user_input == "/reasoning-off": self.reasoning_enabled = False; self.console.print("[bold yellow]Reasoning mode disabled.[/bold yellow]"); continue
 
+                if user_input == "/reasoning-off":
+                    self.reasoning_enabled = False
+                    self.console.print("[bold yellow]Reasoning mode disabled.[/bold yellow]")
+                    continue
+
+                if user_input == "/context":
+                    self._display_context_info()
+                    continue
+
+                # ── Process User Message ──
                 self.messages.append({"role": "user", "content": user_input})
+
+                # Check if summarization is needed before sending to LLM
+                if self.token_manager.should_summarize(self.messages):
+                    self.console.print("[dim yellow]⚡ Context getting large — summarizing older messages...[/dim yellow]")
+                    self.messages = self.token_manager.summarize_messages(self.messages, self.llm)
+                    self.console.print("[dim green]✓ Context summarized successfully.[/dim green]")
+
                 last_turn_tokens = self._process_ai_response(TOOLS, TOOL_HANDLERS)
                 
                 # Display usage
                 if last_turn_tokens:
-                    self.console.print(f"\n[dim magenta]Usage this turn: {last_turn_tokens['total']} tokens "
-                                     f"(P: {last_turn_tokens.get('prompt', 0)}, C: {last_turn_tokens.get('completion', 0)})[/dim magenta]")
+                    conv_tokens = self.token_manager.get_conversation_tokens(self.messages)
+                    budget = self.token_manager.get_budget()
+                    self.console.print(
+                        f"\n[dim magenta]Turn: {last_turn_tokens['total']} tokens "
+                        f"(P: {last_turn_tokens.get('prompt', 0)}, C: {last_turn_tokens.get('completion', 0)}) "
+                        f"| Context: {conv_tokens:,}/{budget['conversation']:,}[/dim magenta]"
+                    )
                     self.total_tokens["prompt"] += last_turn_tokens.get("prompt", 0)
                     self.total_tokens["completion"] += last_turn_tokens.get("completion", 0)
                     self.total_tokens["total"] += last_turn_tokens.get("total", 0)
@@ -90,6 +165,33 @@ class ChatLoop:
                 self._handle_exit(None, None)
             except Exception as e:
                 self.console.print(f"[bold red]Error:[/bold red] {str(e)}")
+
+    def _display_context_info(self):
+        """Display current token budget breakdown."""
+        budget = self.token_manager.get_budget()
+        sys_tokens = self.token_manager.count_message_tokens(
+            [m for m in self.messages if m.get("role") == "system"]
+        )
+        conv_tokens = self.token_manager.get_conversation_tokens(self.messages)
+        total_used = sys_tokens + conv_tokens
+
+        self.console.print("\n[bold cyan]📊 Context Window Status[/bold cyan]")
+        self.console.print(f"  Model:          {budget['model']}")
+        self.console.print(f"  Context Limit:  {budget['context_limit']:,} tokens")
+        self.console.print(f"  System Prompt:  {sys_tokens:,} / {budget['system_prompt']:,} tokens")
+        self.console.print(f"  Conversation:   {conv_tokens:,} / {budget['conversation']:,} tokens")
+        self.console.print(f"  Total Used:     {total_used:,} / {budget['context_limit']:,} tokens")
+        self.console.print(f"  Summarize At:   {budget['summarize_at']:,} tokens")
+        self.console.print(f"  Messages:       {len(self.messages)}")
+        
+        pct = (total_used / budget['context_limit']) * 100
+        if pct > 80:
+            self.console.print(f"  [bold red]⚠️  {pct:.1f}% used — summarization imminent[/bold red]")
+        elif pct > 50:
+            self.console.print(f"  [yellow]📈 {pct:.1f}% used[/yellow]")
+        else:
+            self.console.print(f"  [green]✓ {pct:.1f}% used[/green]")
+        self.console.print()
 
     def _process_ai_response(self, tools, handlers) -> dict:
         import json

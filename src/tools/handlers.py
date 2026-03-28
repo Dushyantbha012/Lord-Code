@@ -2,6 +2,14 @@ import subprocess
 import os
 import glob
 
+from src.tools.search import (
+    find_files,
+    search_in_files,
+    find_definition,
+    get_git_diff,
+    get_git_log,
+)
+
 def read_file(path: str) -> str:
     try:
         with open(path, 'r') as f:
@@ -52,5 +60,11 @@ TOOL_HANDLERS = {
     "write_file": write_file,
     "execute_command": execute_command,
     "list_files": list_files,
-    "grep_search": grep_search
+    "grep_search": grep_search,
+    # Smart Search Tools (Feature 2.2)
+    "find_files": find_files,
+    "search_in_files": search_in_files,
+    "find_definition": find_definition,
+    "get_git_diff": get_git_diff,
+    "get_git_log": get_git_log,
 }
