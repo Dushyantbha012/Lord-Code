@@ -141,3 +141,26 @@ def print_tool_call(name: str, arguments: dict) -> None:
     """Print a tool call with its arguments."""
     arg_str = ", ".join(f"[muted]{k}[/muted]=[info]{v}[/info]" for k, v in arguments.items())
     console.print(f"  [accent]⚙[/accent] [brand]Executing {name}[/brand]({arg_str})...")
+
+def print_terminal_preview(command: str) -> None:
+    """Print a terminal-style panel with the command to be executed."""
+    panel = Panel(
+        Text(f"$ {command}", style="white"),
+        title="[muted]Terminal Preview[/muted]",
+        title_align="left",
+        border_style="dim white",
+        padding=(0, 1),
+        box=box.SQUARE
+    )
+    console.print(panel)
+
+def ask_confirmation(message: str) -> bool:
+    """Ask for user confirmation (y/n)."""
+    console.print(f"\n  [warning]⚠ [/warning] [brand]{message}[/brand] [muted](y/n)[/muted]")
+    from prompt_toolkit.shortcuts import confirm
+    # Using simple prompt fallback for now, but confirm() is better.
+    try:
+        choice = input("  ❯ ").strip().lower()
+        return choice in ["y", "yes"]
+    except:
+        return False

@@ -14,9 +14,10 @@ class CodingAgent:
                 "You are working inside the Lord-Code repository. "
                 "Guidelines:\n"
                 "1. All file tools (read_file, write_file, list_dir) use paths relative to the project root.\n"
-                "2. ALWAYS start by exploring the directory structure with `list_dir('.')` if you are unsure where a file is.\n"
-                "3. Do not hallucinate file contents; read them first.\n"
-                "4. Be concise and professional."
+                "2. Use `list_dir(recursive=True)` for deep exploration of subdirectories.\n"
+                "3. You can execute shell commands using `run_command(command)`. Use this for installation, tests, and script execution.\n"
+                "4. All shell commands targeting deletion (like `rm`) will be flagged for user approval.\n"
+                "5. Be concise and professional."
             )
         self.client = GroqClient()
         self.system_prompt = system_prompt
@@ -36,14 +37,12 @@ class CodingAgent:
             message = completion.choices[0].message
             tool_calls = getattr(message, "tool_calls", None)
 
-            # 2. If no tool calls, return final content
             if not tool_calls:
                 content = message.content or ""
                 self.messages.append({"role": "assistant", "content": content})
                 return content
 
-            # 3. Handle Tool Calls
-            # Add the assistant's request for tool use to the history
+            # Handle Tool Calls
             self.messages.append(message)
 
             for tool_call in tool_calls:
@@ -53,13 +52,30 @@ class CodingAgent:
                 # Visual log
                 try:
                     args_dict = json.loads(function_args)
-                    print_tool_call(function_name, args_dict)
+                    from src.cli.theme import print_tool_call, print_terminal_preview, ask_confirmation
+                    
+                    if function_name == "run_command":
+                        cmd = args_dict.get("command", "")
+                        print_terminal_preview(cmd)
+                    else:
+                        print_tool_call(function_name, args_dict)
                 except:
+                    from src.cli.theme import print_tool_call
                     print_tool_call(function_name, {"raw": function_args})
 
                 # Execute tool
                 result = tool_manager.execute_tool(function_name, function_args)
                 
+                # Handle approval logic for shell deletions
+                if function_name == "run_command" and result.startswith("APPROVAL_REQUIRED:"):
+                    if ask_confirmation("Do you want to proceed with this command?"):
+                        # Re-run with approved prefix
+                        cmd = json.loads(function_args).get("command", "")
+                        approved_args = json.dumps({"command": f"#APPROVED# {cmd}"})
+                        result = tool_manager.execute_tool(function_name, approved_args)
+                    else:
+                        result = "User cancelled command execution."
+
                 # Append tool result to history
                 self.messages.append({
                     "role": "tool",

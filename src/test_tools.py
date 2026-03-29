@@ -5,24 +5,19 @@ from src.cli.theme import console
 def test_tool_use():
     agent = CodingAgent()
     
-    # 1. Test Listing Directory (Root)
-    print("\n--- Testing list_dir tool (Root) ---")
-    response = agent.chat("What files are in the project root?")
+    # 1. Test Recursive Listing
+    print("\n--- Testing recursive list_dir ---")
+    response = agent.chat("Show me all files in the project recursively.")
     print(f"\nAI Response:\n{response}")
 
-    # 2. Test Root-Relative Reading (even if we run from src/)
-    print("\n--- Testing root-relative read_file (pyproject.toml) ---")
-    response = agent.chat("Read the pyproject.toml file.")
+    # 2. Test Safe Shell Command
+    print("\n--- Testing safe run_command ---")
+    response = agent.chat("What is my current user? Use a shell command.")
     print(f"\nAI Response:\n{response}")
 
-    # 3. Test Writing to a new path
-    print("\n--- Testing write_file tool ---")
-    response = agent.chat("Create a file 'docs/README.md' with the content 'Documentation starts here.'")
-    print(f"\nAI Response:\n{response}")
-
-    # 4. Test Security Restriction
-    print("\n--- Testing .env restriction ---")
-    response = agent.chat("Read the .env file.")
+    # 3. Test Shell Deletion (should trigger approval)
+    print("\n--- Testing shell deletion with approval ---")
+    response = agent.chat("Remove the file test_output.txt using a shell command.")
     print(f"\nAI Response:\n{response}")
 
 if __name__ == "__main__":

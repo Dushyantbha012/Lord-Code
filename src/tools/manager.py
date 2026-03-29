@@ -35,8 +35,11 @@ class ToolManager:
 # Singleton instance for easy access
 tool_manager = ToolManager()
 
-# Automatically register tools from file_ops
+# Automatically register tools
 from src.tools.file_ops import read_file, write_file, list_dir
+from src.tools.shell import run_command
+
 tool_manager.register(read_file)
 tool_manager.register(write_file)
 tool_manager.register(list_dir)
+tool_manager.register(run_command)
