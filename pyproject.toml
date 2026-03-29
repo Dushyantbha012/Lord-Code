@@ -10,7 +10,7 @@ packages = [{include = "src"}]
 lordcode = "src.main:cli"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.9, <4.0"
 groq = ">=0.11.0"
 openai = ">=1.0.0"
 anthropic = ">=0.30.0"

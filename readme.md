@@ -24,11 +24,23 @@ python3 -m venv .venv
 source .venv/bin/activate
 # Using Poetry (recommended):
 poetry install
-# Or using pip:
-pip install groq openai anthropic google-genai rich prompt-toolkit click python-dotenv pathspec aiofiles
+# Using pip (easiest for global CLI):
+pip install -e .
 ```
 
-### 2. Set Up API Key
+### 2. Global CLI Setup (Recommended)
+
+To run **lordcode** from any folder on your machine, add a shortcut to your terminal profile:
+
+```bash
+# Get the absolute path to your venv binary
+echo "alias lordcode='$(pwd)/.venv/bin/lordcode'" >> ~/.zshrc
+source ~/.zshrc
+```
+
+Now you can `cd` into any project and just type `lordcode`.
+
+### 3. Set Up API Keys
 
 Get API keys for the providers you want to use:
 - **Groq** (Default, very fast): [console.groq.com](https://console.groq.com)
@@ -44,10 +56,17 @@ echo "ANTHROPIC_API_KEY=your-key" >> .env
 echo "GEMINI_API_KEY=your-key" >> .env
 ```
 
-### 3. Run
+### 4. Run
 
+Inside the project directory:
 ```bash
-python -m src.main
+python3 -m src.main
+```
+
+Across any project directory (using the alias):
+```bash
+cd /path/to/any/project
+lordcode
 ```
 
 ## Usage
