@@ -118,7 +118,7 @@ class OutputManager:
     @contextmanager
     def tool_execution_spinner(self, tool_name: str, args: dict):
         """Show a spinner while a tool is executing."""
-        args_str = ", ".join(f"{k}={repr(v)[:50]}" for k, v in args.items())
+        args_str = ", ".join(f"{k}={repr(v).replace(chr(92)+'n', ' ⏎ ')[:50]}" for k, v in args.items())
         if len(args_str) > 60:
             args_str = args_str[:57] + "..."
             
@@ -130,7 +130,7 @@ class OutputManager:
         style = "green" if result.success else "red"
         icon = "✓" if result.success else "❌"
         
-        args_str = ", ".join(f"{k}={repr(v)[:50]}" for k, v in args.items())
+        args_str = ", ".join(f"{k}={repr(v).replace(chr(92)+'n', ' ⏎ ')[:50]}" for k, v in args.items())
         if len(args_str) > 60:
             args_str = args_str[:57] + "..."
             

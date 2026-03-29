@@ -7,7 +7,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.syntax import Syntax
@@ -84,26 +84,57 @@ class SafetyManager:
         )
 
     def _format_write_file_panel(self, args: dict) -> Panel:
+        import difflib
         path = args.get("file_path", "unknown")
         content = args.get("content", "")
-        lines = len(content.splitlines())
+        
+        resolved_path, error = self._path_validator.validate(path)
+        is_new = True
+        diff_text = ""
+        
+        if not error and resolved_path.exists():
+            is_new = False
+            try:
+                old_content = resolved_path.read_text(encoding="utf-8")
+                old_lines = old_content.splitlines(keepends=True)
+                new_lines = content.splitlines(keepends=True)
+                diff = difflib.unified_diff(
+                    old_lines, new_lines,
+                    fromfile=f"a/{path}",
+                    tofile=f"b/{path}",
+                    lineterm=""
+                )
+                diff_text = "".join(diff)
+            except Exception:
+                pass
 
-        body = f"[bold]Path:[/bold] {path}\n[bold]Lines:[/bold] {lines}"
-
-        # Show a preview of the content (first 20 lines)
-        if content:
-            preview_lines = content.splitlines()[:20]
-            preview = "\n".join(preview_lines)
-            if len(content.splitlines()) > 20:
-                preview += "\n[dim]... (truncated)[/dim]"
-            body += f"\n\n[bold]Preview:[/bold]\n{preview}"
-
-        # Check for sensitive file
+        renderables = []
+        renderables.append(f"[bold]Path:[/bold] {path}")
+        
         warning = self._path_validator.is_sensitive(path)
         if warning:
-            body += f"\n\n[yellow]{warning}[/yellow]"
+            renderables.append(f"[yellow]{warning}[/yellow]")
+            
+        renderables.append("")
 
-        return Panel(body, title="✏️  Write File", border_style="yellow")
+        if is_new:
+            renderables.append("[green]✨ New file will be created.[/green]")
+            preview = content[:1000]
+            if len(content) > 1000:
+                preview += "\n... (truncated)"
+            renderables.append(Syntax(preview, "python", theme="monokai", word_wrap=True))
+        else:
+            if diff_text:
+                num_lines = len(diff_text.splitlines())
+                if num_lines > 50:
+                    truncated_diff = "\n".join(diff_text.splitlines()[:50]) + f"\n... ({num_lines - 50} more changes)"
+                    renderables.append(Syntax(truncated_diff, "diff", theme="monokai", word_wrap=True))
+                else:
+                    renderables.append(Syntax(diff_text, "diff", theme="monokai", word_wrap=True))
+            else:
+                renderables.append("[dim](No changes)[/dim]")
+
+        return Panel(Group(*renderables), title="✏️  Review Changes", border_style="yellow")
 
     def _format_run_command_panel(self, args: dict) -> Panel:
         command = args.get("command", "unknown")
