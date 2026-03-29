@@ -21,6 +21,7 @@ COMMAND_DESCRIPTIONS = {
     "/mode <mode>": "Change safety mode (paranoid/smart/yolo)",
     "/provider <name>": "Switch LLM provider (groq/openai/anthropic/gemini/ollama)",
     "/model <name>": "Switch model on current provider",
+    "/undo": "Revert the last file modification made by Lord-Code",
     "/providers": "List all available providers",
     "/cost": "Show token usage and cost",
     "/history": "Show condensed conversation history",
@@ -79,6 +80,18 @@ class CommandHandler:
 
         elif cmd == "/cost":
             self._output.display_info(self._agent.token_tracker.get_summary())
+
+        elif cmd == "/undo":
+            from src.safety.checkpoints import CheckpointManager
+            try:
+                mgr = CheckpointManager()
+                success, msg = mgr.revert_last()
+                if success:
+                    self._output.display_success(f"✅ Undo: {msg}")
+                else:
+                    self._output.display_warning(f"⚠️ Undo: {msg}")
+            except Exception as e:
+                self._output.display_error(f"Undo error: {e}")
 
         elif cmd == "/history":
             history = self._agent.history.get_condensed_history()

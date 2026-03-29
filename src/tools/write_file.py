@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from src.tools.base import BaseTool, RiskLevel, ToolResult
+from src.safety.checkpoints import CheckpointManager
 
 
 class WriteFileTool(BaseTool):
@@ -98,6 +99,13 @@ class WriteFileTool(BaseTool):
                 diff_text = self._compute_diff(old_content, content, str(rel_path))
             except Exception:
                 old_content = ""
+                
+        # Capture snapshot for safety/undo
+        try:
+            checkpoint_mgr = CheckpointManager()
+            checkpoint_mgr.create_snapshot(str(path), old_content, is_new=is_new)
+        except Exception:
+            pass
 
         # Create parent directories
         path.parent.mkdir(parents=True, exist_ok=True)

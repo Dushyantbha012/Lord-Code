@@ -9,6 +9,7 @@ A terminal-based AI coding assistant powered by Groq's ultra-fast inference API.
 - ⚡ **Command Execution** — Run shell commands with safety guardrails
 - 🔄 **Agentic Loop** — Multi-step tool chains that self-correct on errors
 - 🛡️ **Tri-Mode Safety** — Paranoid, Smart, or YOLO modes for tool approval
+- ⏪ **Safe Undos** — The `/undo` command gracefully reverts file modifications seamlessly. Powered by a background `CheckpointManager` that automatically caches up to 10 edits inside `~/.lord-code/checkpoints/undo_stack.json`, meaning your actual project directories stay 100% clean and untouched by `.bak` backup files.
 - 📡 **Streaming Responses** — Real-time token streaming across supported providers
 - 💰 **Cost Tracking** — Token usage and cost estimation per session (with provider-specific pricing)
 - 🔀 **Multi-Provider** — Switch between Groq, OpenAI, Anthropic, Gemini, and Ollama (local) on the fly
