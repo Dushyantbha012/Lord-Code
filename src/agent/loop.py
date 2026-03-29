@@ -191,14 +191,18 @@ class Agent:
                     "arguments": "",
                 }
                 if self.config.display.show_tool_calls:
-                    self.output.display_tool_calling(chunk.tool_call_name or "unknown")
+                    self.output.start_tool_stream(chunk.tool_call_name or "unknown")
 
             elif chunk.event_type == StreamEventType.TOOL_CALL_DELTA:
                 idx = chunk.tool_call_index or 0
                 if idx in tool_accumulators:
                     tool_accumulators[idx]["arguments"] += chunk.content
+                    if self.config.display.show_tool_calls:
+                        self.output.stream_tool_arg(chunk.content)
 
             elif chunk.event_type == StreamEventType.TOOL_CALL_END:
+                if self.config.display.show_tool_calls:
+                    self.output.end_tool_stream()
                 idx = chunk.tool_call_index or 0
                 if idx in tool_accumulators:
                     acc = tool_accumulators[idx]
@@ -245,10 +249,6 @@ class Agent:
             # Guard: ensure arguments is a dict (LLM can send None)
             safe_args = tc.arguments if isinstance(tc.arguments, dict) else {}
 
-            # Display what's being called
-            if self.config.display.show_tool_calls and not self.config.display.stream:
-                self.output.display_tool_call(tc.name, safe_args)
-
             # Safety check
             if risk is not None:
                 decision, reason = await self.safety.check(tc.name, safe_args, risk)
@@ -266,11 +266,13 @@ class Agent:
                 self.history.add_tool_result(tc.id, "User aborted the operation.")
                 return
 
-            # Execute the tool
-            result = await self.tools.execute(tc.name, safe_args)
-
-            # Display result
-            self.output.display_tool_result(tc.name, result)
+            # Execute the tool and show spinner
+            if self.config.display.show_tool_calls:
+                with self.output.tool_execution_spinner(tc.name, safe_args):
+                    result = await self.tools.execute(tc.name, safe_args)
+                self.output.display_tool_result_panel(tc.name, safe_args, result)
+            else:
+                result = await self.tools.execute(tc.name, safe_args)
 
             # Track stats
             if tc.name == "write_file" and result.success:

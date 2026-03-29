@@ -16,6 +16,8 @@ from rich.text import Text
 from rich.status import Status
 from rich.theme import Theme
 from rich.table import Table
+from rich.live import Live
+from rich.tree import Tree
 
 if TYPE_CHECKING:
     from src.agent.history import TokenTracker
@@ -40,6 +42,11 @@ class OutputManager:
         self._console = Console(theme=LORDCODE_THEME)
         self._syntax_theme = theme
         self._streaming = False
+        self._live_text: Optional[Live] = None
+        self._streaming_text = ""
+        self._live_tool: Optional[Live] = None
+        self._streaming_tool_args = ""
+        self._current_tool_name = ""
 
     @property
     def console(self) -> Console:
@@ -59,37 +66,86 @@ class OutputManager:
     def start_stream(self) -> None:
         """Begin streaming output."""
         self._streaming = True
-        self._console.print()
+        self._streaming_text = ""
+        self._live_text = Live(Markdown(self._streaming_text), console=self._console, refresh_per_second=15, transient=False)
+        self._live_text.start()
 
     def stream_token(self, token: str) -> None:
         """Print a single streaming token."""
-        print(token, end="", flush=True)
+        self._streaming_text += token
+        if self._live_text:
+            self._live_text.update(Markdown(self._streaming_text))
+        else:
+            print(token, end="", flush=True)
 
     def end_stream(self) -> None:
         """End streaming output."""
         if self._streaming:
-            print()  # Newline after stream
+            if self._live_text:
+                self._live_text.stop()
+                self._live_text = None
+            else:
+                print()  # Newline after stream
             self._streaming = False
 
     # -----------------------------------------------------------------
     # Tool display
     # -----------------------------------------------------------------
 
-    def display_tool_call(self, tool_name: str, args: dict) -> None:
-        """Show that a tool is being called."""
+    def start_tool_stream(self, tool_name: str) -> None:
+        """Begin streaming a tool argument draft."""
+        self._current_tool_name = tool_name
+        self._streaming_tool_args = ""
+        syntax = Syntax("", "json", theme=self._syntax_theme, word_wrap=True)
+        panel = Panel(syntax, title=f"⚡ Drafting Call: [tool]{tool_name}[/tool]", border_style="cyan")
+        self._live_tool = Live(panel, console=self._console, refresh_per_second=15, transient=True)
+        self._live_tool.start()
+
+    def stream_tool_arg(self, chunk: str) -> None:
+        """Update the tool argument draft."""
+        self._streaming_tool_args += chunk
+        if self._live_tool:
+            syntax = Syntax(self._streaming_tool_args, "json", theme=self._syntax_theme, word_wrap=True)
+            panel = Panel(syntax, title=f"⚡ Drafting Call: [tool]{self._current_tool_name}[/tool]", border_style="cyan")
+            self._live_tool.update(panel)
+
+    def end_tool_stream(self) -> None:
+        """End the tool argument draft."""
+        if self._live_tool:
+            self._live_tool.stop()
+            self._live_tool = None
+
+    @contextmanager
+    def tool_execution_spinner(self, tool_name: str, args: dict):
+        """Show a spinner while a tool is executing."""
         args_str = ", ".join(f"{k}={repr(v)[:50]}" for k, v in args.items())
-        self._console.print(
-            f"  [tool]🔧 Calling {tool_name}[/tool]({args_str})",
-        )
+        if len(args_str) > 60:
+            args_str = args_str[:57] + "..."
+            
+        with self._console.status(f"[tool]⚙️  Executing {tool_name}[/tool]([dim]{args_str}[/dim])", spinner="dots"):
+            yield
 
-    def display_tool_calling(self, tool_name: str) -> None:
-        """Show that a tool call is starting (during streaming)."""
-        self._console.print(f"  [tool]🔧 Calling {tool_name}...[/tool]")
-
-    def display_tool_result(self, tool_name: str, result: "ToolResult") -> None:
-        """Show the result of a tool execution."""
+    def display_tool_result_panel(self, tool_name: str, args: dict, result: "ToolResult") -> None:
+        """Show the truncated execution result inside a neat panel."""
         style = "green" if result.success else "red"
-        self._console.print(f"  [{style}]{result.display_output}[/{style}]")
+        icon = "✓" if result.success else "❌"
+        
+        args_str = ", ".join(f"{k}={repr(v)[:50]}" for k, v in args.items())
+        if len(args_str) > 60:
+            args_str = args_str[:57] + "..."
+            
+        output_str = str(result.display_output)
+        if len(output_str) > 200:
+            output_str = output_str[:197] + "..."
+            
+        text = f"[bold {style}]{icon} completed[/bold {style}]\n[dim]{output_str}[/dim]"
+        panel = Panel(
+            text, 
+            title=f"[tool]{tool_name}[/tool]({args_str})",
+            border_style=style,
+            expand=False
+        )
+        self._console.print(panel)
 
     def display_tool_rejected(self, tool_name: str, reason: str) -> None:
         """Show that a tool call was rejected."""
