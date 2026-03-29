@@ -25,6 +25,8 @@ async def main_loop(
     mode: str | None,
     no_stream: bool,
     verbose: bool,
+    resume: bool,
+    fork_session: bool,
 ) -> None:
     """The async main loop — wires up all components and runs."""
     # Lazy imports to keep CLI startup fast
@@ -47,6 +49,85 @@ async def main_loop(
 
     # Initialize output first (needed for error display)
     output = OutputManager(theme=config.display.theme)
+
+    # Session Resolution Logic
+    import uuid
+    import shutil
+    import datetime
+    
+    lord_code_dir = Path(config.working_directory) / ".lord-code"
+    sessions_dir = lord_code_dir / "sessions"
+    current_session_file = lord_code_dir / "current_session.txt"
+    
+    session_id = uuid.uuid4().hex[:8]
+    
+    if resume or fork_session:
+        if not sessions_dir.exists() or not list(sessions_dir.glob("*.json")):
+            output.display_warning("⚠️ No previous sessions found. Starting a new session.")
+        else:
+            import questionary
+            from questionary import Choice
+            
+            files = sorted(sessions_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            
+            # Read last session to set default
+            default_session = None
+            if current_session_file.exists():
+                default_session = current_session_file.read_text().strip()
+                
+            choices = []
+            for f in files:
+                sid = f.stem
+                dt = datetime.datetime.fromtimestamp(f.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+                mark = "*" if sid == default_session else " "
+                choices.append(Choice(f"[{mark}] {sid} (Updated: {dt})", sid))
+                
+            if len(files) == 1:
+                selected_sid = files[0].stem
+                if resume:
+                    session_id = selected_sid
+                else:
+                    sessions_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(sessions_dir / f"{selected_sid}.json", sessions_dir / f"{session_id}.json")
+            else:
+                try:
+                    action = "resume" if resume else "fork"
+                    selected_sid = await questionary.select(
+                        f"Select session to {action}:",
+                        choices=choices,
+                    ).ask_async()
+                    
+                    if not selected_sid:
+                        sys.exit(0)
+                        
+                    if resume:
+                        session_id = selected_sid
+                    else:
+                        sessions_dir.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(sessions_dir / f"{selected_sid}.json", sessions_dir / f"{session_id}.json")
+                except Exception:
+                    sys.exit(0)
+                    
+    config.session_id = session_id
+    
+    try:
+        current_session_file.parent.mkdir(parents=True, exist_ok=True)
+        current_session_file.write_text(session_id)
+    except Exception:
+        pass
+
+    # Ensure .gitignore covers lord-code
+    try:
+        gitignore = Path(config.working_directory) / ".gitignore"
+        entry = "\n# Lord-Code config\n.lord-code/\n"
+        if gitignore.exists():
+            content = gitignore.read_text(encoding="utf-8")
+            if ".lord-code/" not in content and ".lord-code\n" not in content:
+                gitignore.write_text(content + entry, encoding="utf-8")
+        else:
+            gitignore.write_text(entry, encoding="utf-8")
+    except Exception:
+        pass
 
     # Display the large ASCII logo at the very top
     output.display_logo()
@@ -120,6 +201,7 @@ async def main_loop(
         mode=config.safety.mode,
         project_dir=config.working_directory,
         project_type=project_type,
+        session_id=config.session_id,
     )
 
     # Initialize CLI and run
@@ -167,6 +249,18 @@ async def main_loop(
     default=False,
     help="Enable verbose output.",
 )
+@click.option(
+    "-r", "--resume",
+    is_flag=True,
+    default=False,
+    help="Resume a previous chat session.",
+)
+@click.option(
+    "--fork-session",
+    is_flag=True,
+    default=False,
+    help="Fork a previous session into a new parallel state.",
+)
 @click.version_option(version=VERSION, prog_name="Lord-Code")
 def cli(
     provider: str | None,
@@ -174,10 +268,12 @@ def cli(
     mode: str | None,
     no_stream: bool,
     verbose: bool,
+    resume: bool,
+    fork_session: bool,
 ) -> None:
     """🤖 Lord-Code — AI Coding Agent for your terminal."""
     try:
-        asyncio.run(main_loop(provider, model, mode, no_stream, verbose))
+        asyncio.run(main_loop(provider, model, mode, no_stream, verbose, resume, fork_session))
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
         sys.exit(0)

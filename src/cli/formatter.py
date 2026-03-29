@@ -211,7 +211,8 @@ class OutputManager:
         provider: str,
         mode: str,
         project_dir: str,
-        project_type: str = "Unknown",
+        project_type: str,
+        session_id: str = "",
     ) -> None:
         """Display the session info block."""
 
@@ -219,12 +220,14 @@ class OutputManager:
         table.add_column(style="bold cyan")
         table.add_column()
         table.add_row("🤖 Lord-Code", f"v{version}")
-        table.add_row("Model", f"{model} ({provider})")
-        table.add_row("Mode", mode)
-        table.add_row("Project", project_dir)
-        if project_type != "Unknown":
-            table.add_row("Detected", project_type)
-        table.add_row("Help", "Type /help for commands")
+        table.add_row("Model", f"{model} [dim]({provider})[/dim]")
+        table.add_row("Project", f"{project_type}")
+        table.add_row("Directory", project_dir)
+        if session_id:
+            table.add_row("Session ID", f"[cyan]{session_id}[/cyan]")
+
+        self.console.print(table)
+        self.console.print("\n[dim]Ready! Type /help for commands or just start typing...[/dim]\n")
 
         panel = Panel(
             table,

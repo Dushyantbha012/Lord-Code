@@ -47,7 +47,11 @@ class Agent:
 
         # Build system prompt with project context
         system_prompt = build_system_prompt(config.working_directory)
-        self.history = HistoryManager(system_prompt)
+        self.history = HistoryManager(
+            system_prompt,
+            persist_dir=config.working_directory,
+            session_id=config.session_id,
+        )
         self.token_tracker = TokenTracker()
         self.token_tracker.set_model(llm.model_name)
 

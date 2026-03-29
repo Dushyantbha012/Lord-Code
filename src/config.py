@@ -120,6 +120,7 @@ class Config:
     # Runtime overrides (set via CLI flags, not persisted)
     verbose: bool = False
     working_directory: str = field(default_factory=lambda: os.getcwd())
+    session_id: str = ""
 
 
 # ---------------------------------------------------------------------------

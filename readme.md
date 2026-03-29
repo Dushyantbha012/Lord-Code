@@ -10,6 +10,7 @@ A terminal-based AI coding assistant powered by Groq's ultra-fast inference API.
 - 🔄 **Agentic Loop** — Multi-step tool chains that self-correct on errors
 - 🛡️ **Tri-Mode Safety** — Paranoid, Smart, or YOLO modes for tool approval
 - ⏪ **Safe Undos** — The `/undo` command gracefully reverts file modifications seamlessly. Powered by a background `CheckpointManager` that automatically caches up to 10 edits inside `~/.lord-code/checkpoints/undo_stack.json`, meaning your actual project directories stay 100% clean and untouched by `.bak` backup files.
+- 🧠 **Session Memory & Branching** — Lord-Code automatically saves chat history to isolate complex tasks. Pick up where you left off using `--resume`, or diverge to a parallel workflow using `--fork-session`!
 - 📡 **Streaming Responses** — Real-time token streaming across supported providers
 - 💰 **Cost Tracking** — Token usage and cost estimation per session (with provider-specific pricing)
 - 🔀 **Multi-Provider** — Switch between Groq, OpenAI, Anthropic, Gemini, and Ollama (local) on the fly
@@ -100,6 +101,7 @@ The project contains the following structure...
 | `/model <name>` | Switch model |
 | `/cost` | Show token usage and cost |
 | `/history` | Show conversation history |
+| `/undo` | Revert the last file modification made by Lord-Code |
 | `/retry` | Re-send last message |
 | `/info` | Show current configuration |
 
@@ -119,7 +121,9 @@ python -m src.main --provider openai --model gpt-4o
 python -m src.main --provider ollama --model llama3.1:8b
 python -m src.main --mode yolo --no-stream
 
-python -m src.main -v  # verbose mode
+python -m src.main --resume          # Resume a prior chat session
+python -m src.main --fork-session    # Clone a prior chat session to a new state
+python -m src.main -v                # Verbose mode
 ```
 
 ## Architecture

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
 
 from src.llm.base import ToolCall, TokenUsage
@@ -91,9 +92,32 @@ class TokenTracker:
 class HistoryManager:
     """Manages conversation history in OpenAI/Groq message format."""
 
-    def __init__(self, system_prompt: str) -> None:
+    def __init__(self, system_prompt: str, persist_dir: Optional[str] = None, session_id: Optional[str] = None) -> None:
         self._system_prompt = system_prompt
         self._messages: list[dict[str, Any]] = []
+        self._persist_path: Optional[Path] = None
+
+        if persist_dir and session_id:
+            dir_path = Path(persist_dir) / ".lord-code" / "sessions"
+            dir_path.mkdir(parents=True, exist_ok=True)
+            self._persist_path = dir_path / f"{session_id}.json"
+            self._load()
+
+    def _load(self) -> None:
+        """Load history from disk."""
+        if self._persist_path and self._persist_path.exists():
+            try:
+                self._messages = json.loads(self._persist_path.read_text(encoding="utf-8"))
+            except Exception:
+                self._messages = []
+
+    def _save(self) -> None:
+        """Save history to disk."""
+        if self._persist_path:
+            try:
+                self._persist_path.write_text(json.dumps(self._messages, indent=2), encoding="utf-8")
+            except Exception:
+                pass
 
     @property
     def message_count(self) -> int:
@@ -102,10 +126,12 @@ class HistoryManager:
     def add_user_message(self, content: str) -> None:
         """Add a user message."""
         self._messages.append({"role": "user", "content": content})
+        self._save()
 
     def add_assistant_text(self, content: str) -> None:
         """Add a plain text assistant response."""
         self._messages.append({"role": "assistant", "content": content})
+        self._save()
 
     def add_assistant_tool_calls(
         self,
@@ -129,6 +155,7 @@ class HistoryManager:
             ],
         }
         self._messages.append(msg)
+        self._save()
 
     def add_tool_result(self, tool_call_id: str, content: str) -> None:
         """Add a tool result message."""
@@ -137,6 +164,7 @@ class HistoryManager:
             "tool_call_id": tool_call_id,
             "content": content,
         })
+        self._save()
 
     def get_messages(self) -> list[dict[str, Any]]:
         """Get the full message list for the API call (system + history)."""
@@ -155,6 +183,7 @@ class HistoryManager:
     def clear(self) -> None:
         """Clear conversation history (keeps system prompt)."""
         self._messages.clear()
+        self._save()
 
     def estimate_tokens(self) -> int:
         """Rough estimate of total tokens in the conversation."""
