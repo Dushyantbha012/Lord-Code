@@ -9,22 +9,40 @@ from src.llm.base import BaseLLM
 from src.config import Config
 from src.context.token_manager import TokenManager
 from src.context.project_config import ProjectConfig
+from src.context.storage import StorageManager
+from src.context.history import HistoryManager
+from src.context.config_snapshots import ConfigSnapshotManager
 from src.tools.undo import UndoManager
 from src.tools.linter import run_linter
-from src.ui.rich_ui import ui  # Feature 4.2 Rich UI
+from src.agent.planner import PlanManager, PlanStatus, StepStatus
+from src.ui.rich_ui import ui
 import time
 
 
 class ChatLoop:
-    def __init__(self, llm: BaseLLM, project_context: str = "", project_config: Optional[ProjectConfig] = None):
+    def __init__(self, llm: BaseLLM, project_context: str = "",
+                 project_config: Optional[ProjectConfig] = None,
+                 storage: Optional[StorageManager] = None):
         self.llm = llm
         self.working_dir = os.getcwd()
         self.project_config = project_config or ProjectConfig()
 
+        # ── .lord-code Storage (Feature 5) ──
+        self.storage = storage or StorageManager(self.working_dir)
+
         # ── Undo/Rollback System (Feature 3.5) ──
         self.undo_manager = UndoManager(self.working_dir)
 
-        # ── Build System Prompt with Project Context ──
+        # ── Multi-Step Planner (Feature 4) — now uses .lord-code/plans/ ──
+        self.plan_manager = PlanManager(self.working_dir, storage=self.storage)
+
+        # ── History Manager (Feature 5) ──
+        self.history_manager = HistoryManager(self.storage)
+
+        # ── Config Snapshot Manager (Feature 5) ──
+        self.config_snapshots = ConfigSnapshotManager(self.storage)
+
+        # ── Build System Prompt with Project Context + History ──
         system_content = self._build_system_prompt(project_context)
         self.messages: List[Dict[str, str]] = [
             {"role": "system", "content": system_content}
@@ -64,6 +82,14 @@ class ChatLoop:
             "- **Git**: Use git tools (`git_commit`, `git_create_branch`, `git_status`, etc.)",
             "  for version control operations instead of `execute_command`.",
             "",
+            "## Planning",
+            "- For complex, multi-step tasks, call `create_plan` FIRST before executing any other tools.",
+            "- A task is \"complex\" if it involves 3+ file changes, architectural decisions, or multi-stage operations.",
+            "- Simple tasks (reading a file, answering a question, a single edit) do NOT need a plan.",
+            "- When executing a plan, work through steps one at a time and report progress.",
+            "- If you discover that the plan needs adjustment mid-execution, call `update_plan` to modify it.",
+            "- After each step is completed, briefly state the result before moving on.",
+            "",
         ]
 
         if project_context:
@@ -76,11 +102,31 @@ class ChatLoop:
             parts.append(self.project_config.custom_instructions)
             parts.append("")
 
+        # Auto-inject recent session history for better context
+        recent_context = self.history_manager.get_recent_context(n_sessions=2)
+        if recent_context:
+            parts.append(recent_context)
+            parts.append("")
+
         return "\n".join(parts)
 
     def _handle_exit(self, signum, frame):
+        """Graceful exit — finalize history and exit."""
+        self._finalize_session()
         ui.print("\n[bold red]Exiting gracefully...[/bold red]")
         sys.exit(0)
+
+    def _finalize_session(self):
+        """End the current history session with a summary."""
+        try:
+            summary = self.history_manager.generate_session_summary(self.messages)
+            total_tokens = getattr(self, 'total_tokens', {}).get('total', 0)
+            self.history_manager.end_session(
+                summary=summary,
+                token_count=total_tokens,
+            )
+        except Exception:
+            pass  # Non-critical
 
     def _display_welcome(self):
         ui.print("[bold cyan]Welcome to Lord Code![/bold cyan]")
@@ -91,22 +137,45 @@ class ChatLoop:
         sys_tokens = self.token_manager.count_message_tokens(self.messages)
         budget = self.token_manager.get_budget()
         ui.print(f"Context: [dim]{sys_tokens:,} / {budget['context_limit']:,} tokens used[/dim]")
+
+        # Show .lord-code stats
+        stats = self.storage.get_stats()
+        stat_parts = []
+        if stats["session_count"] > 0:
+            stat_parts.append(f"{stats['session_count']} past sessions")
+        if stats["config_snapshot_count"] > 0:
+            stat_parts.append(f"{stats['config_snapshot_count']} saved configs")
+        if stats["has_active_plan"]:
+            stat_parts.append("active plan")
+        if stat_parts:
+            ui.print(f"Storage: [dim]{', '.join(stat_parts)}[/dim]")
+
+        # Show resumed plan if one exists
+        if self.plan_manager.current_plan and self.plan_manager.current_plan.is_active:
+            ui.print(f"\n[bold yellow]📋 Resumed plan:[/bold yellow] {self.plan_manager.current_plan.title}")
+            ui.print_plan(self.plan_manager.current_plan)
         
         ui.print("Type [bold yellow]/exit[/bold yellow] or [bold yellow]/quit[/bold yellow] to leave.")
         ui.print(
             "Commands: [green]/models[/green], [green]/model <id>[/green], "
             "[green]/reasoning-on[/green], [green]/reasoning-off[/green], "
-            "[green]/context[/green], [green]/undo[/green], [green]/changes[/green]"
+            "[green]/context[/green], [green]/undo[/green], [green]/changes[/green], "
+            "[green]/plan[/green], [green]/history[/green], [green]/config[/green]"
         )
         ui.print("-" * 50)
 
     def run(self):
         self._display_welcome()
         from src.tools.definitions import TOOLS
-        from src.tools.handlers import TOOL_HANDLERS, set_undo_manager
+        from src.tools.handlers import TOOL_HANDLERS, set_undo_manager, set_plan_manager
         
         # Inject undo manager into handlers
         set_undo_manager(self.undo_manager)
+        # Inject plan manager into handlers
+        set_plan_manager(self.plan_manager)
+
+        # Start a new history session
+        session_id = self.history_manager.start_session()
         
         self.total_tokens = {"prompt": 0, "completion": 0, "total": 0}
 
@@ -171,8 +240,24 @@ class ChatLoop:
                     ui.print(f"\n[bold cyan]{log}[/bold cyan]\n")
                     continue
 
+                # ── Plan Commands (Feature 4) ──
+                if user_input.startswith("/plan"):
+                    self._handle_plan_command(user_input)
+                    continue
+
+                # ── History Commands (Feature 5) ──
+                if user_input.startswith("/history"):
+                    self._handle_history_command(user_input)
+                    continue
+
+                # ── Config Snapshot Commands (Feature 5) ──
+                if user_input.startswith("/config"):
+                    self._handle_config_command(user_input)
+                    continue
+
                 # ── Process User Message ──
                 self.messages.append({"role": "user", "content": user_input})
+                self.history_manager.append_message({"role": "user", "content": user_input})
 
                 # Reset test retry counter for new user message
                 self._test_retry_count = 0
@@ -185,6 +270,9 @@ class ChatLoop:
 
                 # Begin an undo turn for this AI response
                 self.undo_manager.begin_turn("AI edit")
+
+                # Inject plan context if there's an active plan
+                self._inject_plan_context()
 
                 last_turn_tokens = self._process_ai_response(TOOLS, TOOL_HANDLERS)
 
@@ -208,6 +296,310 @@ class ChatLoop:
                 self._handle_exit(None, None)
             except Exception as e:
                 ui.print(f"[bold red]Error:[/bold red] {str(e)}")
+
+    # ── History Commands ──────────────────────────────────────────────────
+
+    def _handle_history_command(self, command: str):
+        """Handle /history slash commands."""
+        parts = command.strip().split(maxsplit=1)
+
+        if len(parts) == 1:
+            # /history — list recent sessions
+            sessions = self.history_manager.list_sessions(n=10)
+            if not sessions:
+                ui.print("[dim]No past sessions found.[/dim]")
+                return
+
+            ui.print("\n[bold cyan]📜 Session History[/bold cyan]")
+            for sess in sessions:
+                ended = sess.get("ended_at", "unknown")[:16]
+                msgs = sess.get("message_count", 0)
+                tokens = sess.get("token_count", 0)
+                summary = sess.get("summary", "No summary")[:80]
+                sid = sess.get("id", "?")
+                ui.print(
+                    f"  [dim]{ended}[/dim] | [bold]{sid}[/bold] | "
+                    f"{msgs} msgs, {tokens:,} tokens"
+                )
+                ui.print(f"    [dim]{summary}[/dim]")
+            ui.print(f"\n[dim]Use /history <session_id> to view a session[/dim]\n")
+            return
+
+        # /history <session_id> — view a specific session
+        session_id = parts[1].strip()
+        messages = self.history_manager.load_session(session_id)
+        if not messages:
+            ui.print(f"[bold red]Session '{session_id}' not found.[/bold red]")
+            return
+
+        ui.print(f"\n[bold cyan]📜 Session: {session_id}[/bold cyan]")
+        for msg in messages:
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            ts = msg.get("_ts", "")[:16] if msg.get("_ts") else ""
+
+            if role == "user" and content and not content.startswith("[SYSTEM"):
+                ui.print(f"  [dim]{ts}[/dim] [bold cyan]You:[/bold cyan] {content[:200]}")
+            elif role == "assistant":
+                if content:
+                    ui.print(f"  [dim]{ts}[/dim] [bold magenta]AI:[/bold magenta] {content[:200]}")
+                if msg.get("tool_calls"):
+                    for tc in msg["tool_calls"]:
+                        if isinstance(tc, dict) and "function" in tc:
+                            ui.print(f"    [dim]→ Tool: {tc['function'].get('name', '?')}[/dim]")
+            elif role == "tool":
+                name = msg.get("name", "?")
+                result_preview = (content[:80] + "...") if len(content) > 80 else content
+                ui.print(f"    [dim]← {name}: {result_preview}[/dim]")
+        ui.print()
+
+    # ── Config Snapshot Commands ──────────────────────────────────────────
+
+    def _handle_config_command(self, command: str):
+        """Handle /config slash commands."""
+        parts = command.strip().split(maxsplit=2)
+
+        if len(parts) == 1:
+            # /config — show help
+            ui.print(
+                "\n[bold cyan]⚙️ Configuration Commands[/bold cyan]\n"
+                "  [green]/config save <name>[/green]   — Save current config as a snapshot\n"
+                "  [green]/config list[/green]           — List saved config snapshots\n"
+                "  [green]/config load <name>[/green]   — Restore a saved config\n"
+                "  [green]/config delete <name>[/green] — Delete a snapshot\n"
+                "  [green]/config export <name>[/green] — Export to .lordcode.yaml\n"
+                "  [green]/config show[/green]           — Show current config\n"
+            )
+            return
+
+        sub = parts[1].lower()
+
+        if sub == "save":
+            if len(parts) < 3:
+                ui.print("[bold red]Usage: /config save <name>[/bold red]")
+                return
+            name = parts[2].strip()
+            result = self.config_snapshots.save(
+                name,
+                self.project_config,
+                model_id=self.llm.model,
+                reasoning_enabled=self.reasoning_enabled,
+            )
+            ui.print(f"\n{result}\n")
+
+        elif sub == "list":
+            snapshots = self.config_snapshots.list_snapshots()
+            if not snapshots:
+                ui.print("[dim]No saved config snapshots.[/dim]")
+                return
+            ui.print("\n[bold cyan]⚙️ Saved Configurations[/bold cyan]")
+            for snap in snapshots:
+                saved = snap.get("saved_at", "?")[:16]
+                model = snap.get("model", "?")
+                ui.print(f"  [bold]{snap['name']}[/bold] — {model} [dim]({saved})[/dim]")
+            ui.print()
+
+        elif sub == "load":
+            if len(parts) < 3:
+                ui.print("[bold red]Usage: /config load <name>[/bold red]")
+                return
+            name = parts[2].strip()
+            data = self.config_snapshots.load(name)
+            if not data:
+                ui.print(f"[bold red]Snapshot '{name}' not found.[/bold red]")
+                return
+
+            # Apply the config
+            config_data = data.get("config", {})
+            self.project_config = ProjectConfig.from_dict(config_data)
+
+            # Switch model if specified
+            saved_model = data.get("model")
+            if saved_model and saved_model in Config.AVAILABLE_MODELS:
+                from src.llm.groq.factory import get_llm_client
+                self.llm = get_llm_client(saved_model)
+                self.token_manager.update_model(saved_model)
+
+            # Restore reasoning mode
+            self.reasoning_enabled = data.get("reasoning_enabled", False)
+
+            ui.print(f"\n[bold green]✅ Loaded config '{name}'[/bold green]")
+            ui.print(f"  Model: {saved_model or 'unchanged'}")
+            ui.print(f"  Reasoning: {'on' if self.reasoning_enabled else 'off'}")
+            if self.project_config.custom_instructions:
+                ui.print(f"  Custom instructions: yes")
+            ui.print()
+
+        elif sub == "delete":
+            if len(parts) < 3:
+                ui.print("[bold red]Usage: /config delete <name>[/bold red]")
+                return
+            name = parts[2].strip()
+            result = self.config_snapshots.delete(name)
+            ui.print(f"\n{result}\n")
+
+        elif sub == "export":
+            if len(parts) < 3:
+                ui.print("[bold red]Usage: /config export <name>[/bold red]")
+                return
+            name = parts[2].strip()
+            result = self.config_snapshots.export_snapshot(name)
+            ui.print(f"\n{result}\n")
+
+        elif sub == "show":
+            ui.print("\n[bold cyan]⚙️ Current Configuration[/bold cyan]")
+            ui.print(f"  Model:        {self.llm.model}")
+            ui.print(f"  Reasoning:    {'on' if self.reasoning_enabled else 'off'}")
+            ui.print(f"  Token Budget: {self.project_config.token_budget}")
+            if self.project_config.custom_instructions:
+                ui.print(f"  Custom Instr: {self.project_config.custom_instructions[:80]}...")
+            if self.project_config.preferred_tools:
+                ui.print(f"  Pref. Tools:  {', '.join(self.project_config.preferred_tools)}")
+            custom_ignored = [p for p in self.project_config.ignored_paths
+                              if p not in ProjectConfig.DEFAULT_IGNORED_PATHS]
+            if custom_ignored:
+                ui.print(f"  Extra Ignores: {', '.join(custom_ignored)}")
+            ui.print()
+
+        else:
+            ui.print("[bold red]Unknown config command. Use /config for help.[/bold red]")
+
+    # ── Plan Commands ─────────────────────────────────────────────────────
+
+    def _handle_plan_command(self, command: str):
+        """Handle /plan slash commands."""
+        parts = command.strip().split(maxsplit=2)
+
+        # /plan — show current plan
+        if len(parts) == 1:
+            if self.plan_manager.current_plan:
+                ui.print_plan(self.plan_manager.current_plan)
+            else:
+                ui.print("[dim]No active plan.[/dim]")
+            return
+
+        sub = parts[1].lower()
+
+        if sub == "approve":
+            result = self.plan_manager.approve()
+            ui.print(f"\n[bold cyan]{result}[/bold cyan]\n")
+            if self.plan_manager.current_plan and self.plan_manager.current_plan.is_active:
+                ui.print_plan(self.plan_manager.current_plan)
+
+        elif sub == "reject":
+            result = self.plan_manager.reject()
+            ui.print(f"\n[bold cyan]{result}[/bold cyan]\n")
+
+        elif sub == "skip":
+            if len(parts) < 3:
+                ui.print("[bold red]Usage: /plan skip <step_index>[/bold red]")
+                return
+            try:
+                idx = int(parts[2])
+                result = self.plan_manager.skip_step(idx)
+                ui.print(f"\n{result}\n")
+                if self.plan_manager.current_plan:
+                    ui.print_plan(self.plan_manager.current_plan)
+            except ValueError:
+                ui.print("[bold red]Error: Step index must be a number.[/bold red]")
+
+        elif sub == "clear":
+            self.plan_manager.clear()
+            ui.print("[bold yellow]Plan cleared.[/bold yellow]")
+
+        elif sub == "modify":
+            self._interactive_plan_edit()
+
+        else:
+            ui.print(
+                "[bold yellow]Plan commands:[/bold yellow]\n"
+                "  /plan            — Show current plan\n"
+                "  /plan approve    — Approve pending plan\n"
+                "  /plan reject     — Reject pending plan\n"
+                "  /plan skip <n>   — Skip step n\n"
+                "  /plan modify     — Edit the plan interactively\n"
+                "  /plan clear      — Clear current plan"
+            )
+
+    def _interactive_plan_edit(self):
+        """Interactive plan modification mode."""
+        if not self.plan_manager.current_plan:
+            ui.print("[dim]No active plan to edit.[/dim]")
+            return
+
+        ui.print_plan(self.plan_manager.current_plan)
+        ui.print("\n[bold cyan]Plan Edit Mode[/bold cyan]")
+        ui.print("  [green]add <description>[/green]     — Add a step at the end")
+        ui.print("  [green]add <n> <description>[/green] — Insert a step at position n")
+        ui.print("  [green]remove <n>[/green]             — Remove step n")
+        ui.print("  [green]edit <n> <description>[/green] — Change step n's description")
+        ui.print("  [green]done[/green]                   — Exit edit mode")
+        ui.print()
+
+        while True:
+            try:
+                edit_input = input("plan> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+
+            if not edit_input or edit_input.lower() == "done":
+                break
+
+            tokens = edit_input.split(maxsplit=2)
+            action = tokens[0].lower()
+
+            if action == "add":
+                if len(tokens) >= 3 and tokens[1].isdigit():
+                    idx = int(tokens[1])
+                    desc = tokens[2]
+                    result = self.plan_manager.add_step(desc, at_index=idx)
+                elif len(tokens) >= 2:
+                    desc = " ".join(tokens[1:])
+                    result = self.plan_manager.add_step(desc)
+                else:
+                    ui.print("[red]Usage: add <description> or add <index> <description>[/red]")
+                    continue
+                ui.print(result)
+
+            elif action == "remove":
+                if len(tokens) < 2 or not tokens[1].isdigit():
+                    ui.print("[red]Usage: remove <step_index>[/red]")
+                    continue
+                result = self.plan_manager.remove_step(int(tokens[1]))
+                ui.print(result)
+
+            elif action == "edit":
+                if len(tokens) < 3 or not tokens[1].isdigit():
+                    ui.print("[red]Usage: edit <step_index> <new description>[/red]")
+                    continue
+                result = self.plan_manager.modify_step(int(tokens[1]), tokens[2])
+                ui.print(result)
+
+            else:
+                ui.print("[red]Unknown command. Use add, remove, edit, or done.[/red]")
+
+        # Show final state
+        ui.print()
+        ui.print_plan(self.plan_manager.current_plan)
+
+    # ── Plan Context Injection ────────────────────────────────────────────
+
+    def _inject_plan_context(self):
+        """
+        Before each LLM call during an active plan, inject a compact
+        status message so the AI knows where it is in the plan.
+        """
+        if not self.plan_manager.current_plan:
+            return
+        if not self.plan_manager.current_plan.is_active:
+            return
+
+        context = self.plan_manager.to_llm_context()
+        if context:
+            self.messages.append({
+                "role": "user",
+                "content": f"[SYSTEM — Plan Status]\n{context}\n\nContinue executing the plan. Work on the next pending step.",
+            })
 
     def _display_context_info(self):
         """Display current token budget breakdown."""
@@ -319,15 +711,19 @@ class ChatLoop:
         ui.stop_spinner()
 
         if full_response:
-            self.messages.append({"role": "assistant", "content": full_response})
+            msg = {"role": "assistant", "content": full_response}
+            self.messages.append(msg)
+            self.history_manager.append_message(msg)
             ui.print()
 
         if tool_calls:
-            self.messages.append({
+            tc_msg = {
                 "role": "assistant",
                 "tool_calls": tool_calls,
                 "content": full_response or None
-            })
+            }
+            self.messages.append(tc_msg)
+            self.history_manager.append_message(tc_msg)
             
             for tc in tool_calls:
                 name = tc["function"]["name"]
@@ -366,6 +762,18 @@ class ChatLoop:
                 ui.print_tool_result(result, name)
                 self._add_tool_result(tc["id"], name, result)
 
+                # ── Plan Approval Gate (Feature 4) ──
+                if name == "create_plan" and self.plan_manager.current_plan:
+                    self._handle_plan_approval_gate()
+
+                # ── Plan Step Tracking (Feature 4) ──
+                if name == "update_plan" and self.plan_manager.current_plan:
+                    ui.print_plan(self.plan_manager.current_plan)
+
+                # ── Plan Step Auto-Advance ──
+                if self.plan_manager.current_plan and self.plan_manager.current_plan.is_active:
+                    self._auto_advance_plan_step(name, result)
+
                 # ── Auto-Lint after file edits (Feature 3.2) ──
                 if name in ("write_file", "edit_file") and not result.startswith("Error"):
                     file_path = args.get("path", "")
@@ -394,6 +802,22 @@ class ChatLoop:
                             ),
                         })
 
+            # If plan was rejected, don't recurse — stop the agent loop
+            if (self.plan_manager.current_plan 
+                    and self.plan_manager.current_plan.status == PlanStatus.REJECTED):
+                self.messages.append({
+                    "role": "user",
+                    "content": "[SYSTEM] The user rejected the proposed plan. Ask the user how they would like to proceed instead.",
+                })
+                next_usage = self._process_ai_response(tools, handlers)
+                if next_usage and usage:
+                    usage["prompt"] += next_usage["prompt"]
+                    usage["completion"] += next_usage["completion"]
+                    usage["total"] += next_usage["total"]
+                elif next_usage:
+                    usage = next_usage
+                return usage
+
             # Recurse and accumulate usage
             next_usage = self._process_ai_response(tools, handlers)
             if next_usage and usage:
@@ -405,10 +829,69 @@ class ChatLoop:
                 
         return usage
 
+    # ── Plan Approval Gate ────────────────────────────────────────────────
+
+    def _handle_plan_approval_gate(self):
+        """
+        After create_plan is called, show the plan and wait for approval.
+        Auto-approved read-only plans skip the prompt.
+        """
+        plan = self.plan_manager.current_plan
+        ui.print()
+        ui.print_plan(plan)
+
+        if plan.status == PlanStatus.AUTO_APPROVED:
+            ui.print("[bold green]✅ Plan auto-approved (read-only operations only).[/bold green]\n")
+            return
+
+        # Interactive approval
+        response = ui.prompt_plan_approval()
+
+        if response == "y":
+            self.plan_manager.approve()
+            ui.print("[bold green]✅ Plan approved! Starting execution...[/bold green]\n")
+        elif response == "e":
+            # Enter interactive edit mode, then re-prompt
+            self._interactive_plan_edit()
+            # After editing, mark as approved (user has seen the final version)
+            self.plan_manager.approve()
+            ui.print("[bold green]✅ Modified plan approved! Starting execution...[/bold green]\n")
+        else:
+            self.plan_manager.reject()
+            ui.print("[bold red]❌ Plan rejected by user.[/bold red]\n")
+
+    def _auto_advance_plan_step(self, tool_name: str, result: str):
+        """
+        Automatically advance plan steps based on tool execution.
+        Starts the next pending step if none is in progress.
+        """
+        plan = self.plan_manager.current_plan
+        if not plan or not plan.is_active:
+            return
+
+        # Skip plan-management tools themselves
+        if tool_name in ("create_plan", "update_plan"):
+            return
+
+        current_step = self.plan_manager.get_current_step()
+        if not current_step:
+            return
+
+        # If no step is in_progress, start the next pending one
+        if current_step.status == StepStatus.PENDING:
+            self.plan_manager.start_step(current_step.index)
+            ui.print_plan_step_update(
+                current_step.index,
+                current_step.description,
+                "in_progress",
+            )
+
     def _add_tool_result(self, tool_call_id, name, result):
-        self.messages.append({
+        msg = {
             "role": "tool",
             "tool_call_id": tool_call_id,
             "name": name,
             "content": result
-        })
+        }
+        self.messages.append(msg)
+        self.history_manager.append_message(msg)

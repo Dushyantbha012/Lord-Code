@@ -8,3 +8,5 @@ venv/
 .idea/
 .vscode/
 *.log
+.lord-code/
+.lordcode_plan.json

@@ -38,4 +38,6 @@ def needs_confirmation(tool_name: str) -> bool:
         "git_create_branch",
         "git_stash",
         "git_unstash",
+        # Plan modification (Feature 4)
+        "update_plan",
     ]

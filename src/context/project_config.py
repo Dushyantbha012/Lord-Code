@@ -15,6 +15,7 @@ class ProjectConfig:
         "dist/", "build/", ".eggs/", "*.egg-info/",
         ".tox/", ".mypy_cache/", ".pytest_cache/",
         "target/",  # Rust/Java
+        ".lord-code/",  # Lord Code data directory
     ]
 
     DEFAULT_KEY_FILES = [
@@ -95,6 +96,37 @@ class ProjectConfig:
         if "key_files" in data and isinstance(data["key_files"], list):
             extra = [f for f in data["key_files"] if f not in self.key_files]
             self.key_files.extend(extra)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize config to a dict (used by config snapshots)."""
+        data = {}
+        if self.custom_instructions:
+            data["custom_instructions"] = self.custom_instructions
+        if self.model:
+            data["model"] = self.model
+        if self.token_budget:
+            data["token_budget"] = dict(self.token_budget)
+        if self.preferred_tools:
+            data["preferred_tools"] = list(self.preferred_tools)
+
+        # Only include non-default ignored paths
+        custom_ignored = [p for p in self.ignored_paths if p not in self.DEFAULT_IGNORED_PATHS]
+        if custom_ignored:
+            data["ignored_paths"] = custom_ignored
+
+        # Only include non-default key files
+        custom_keys = [f for f in self.key_files if f not in self.DEFAULT_KEY_FILES]
+        if custom_keys:
+            data["key_files"] = custom_keys
+
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProjectConfig":
+        """Deserialize a config from a dict (used by config snapshot restore)."""
+        config = cls()
+        config._apply(data)
+        return config
 
     def __repr__(self):
         return (

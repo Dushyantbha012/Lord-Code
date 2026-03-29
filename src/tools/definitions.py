@@ -348,4 +348,65 @@ TOOLS = [
             }
         }
     },
+    # ── Multi-Step Planning (Feature 4) ──
+    {
+        "type": "function",
+        "function": {
+            "name": "create_plan",
+            "description": (
+                "Create a structured multi-step plan before executing a complex task. "
+                "Use this BEFORE executing any tools when the task involves 3+ file changes, "
+                "architectural decisions, or multi-stage operations. "
+                "The plan will be shown to the user for approval before execution begins. "
+                "Simple tasks (reading a file, answering a question, single edit) do NOT need a plan."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "A short, descriptive title for the plan (e.g., 'Refactor config into package')."
+                    },
+                    "steps": {
+                        "type": "array",
+                        "description": "Ordered list of step descriptions. Each step should be a clear, actionable description.",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": ["title", "steps"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_plan",
+            "description": (
+                "Modify the current active plan mid-execution. Use this when you discover "
+                "that the plan needs adjustment based on intermediate results. "
+                "You can add new steps, remove steps, or modify existing step descriptions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "The modification action to perform.",
+                        "enum": ["add_step", "remove_step", "modify_step"]
+                    },
+                    "step_index": {
+                        "type": "integer",
+                        "description": "The index of the step to modify or remove. Required for 'remove_step' and 'modify_step'. For 'add_step', specifies insertion point (omit to append)."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "The step description. Required for 'add_step' and 'modify_step'."
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
 ]

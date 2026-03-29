@@ -31,6 +31,16 @@ def set_undo_manager(manager):
     _undo_manager = manager
 
 
+# ── Module-level reference to plan manager (set by ChatLoop) ──
+_plan_manager = None
+
+
+def set_plan_manager(manager):
+    """Called by ChatLoop to inject the PlanManager instance."""
+    global _plan_manager
+    _plan_manager = manager
+
+
 def read_file(path: str) -> str:
     try:
         with open(path, 'r') as f:
@@ -89,6 +99,45 @@ def grep_search(pattern: str, path: str) -> str:
         return f"Error in grep search: {str(e)}"
 
 
+# ── Multi-Step Planning Handlers (Feature 4) ──
+
+def create_plan(title: str, steps: list) -> str:
+    """Create a structured multi-step plan."""
+    if not _plan_manager:
+        return "Error: Plan manager not initialized."
+    try:
+        plan = _plan_manager.create_plan(title, steps)
+        return _plan_manager.to_llm_context()
+    except Exception as e:
+        return f"Error creating plan: {str(e)}"
+
+
+def update_plan(action: str, step_index: int = None, description: str = None) -> str:
+    """Modify the current plan mid-execution."""
+    if not _plan_manager:
+        return "Error: Plan manager not initialized."
+    if not _plan_manager.current_plan:
+        return "Error: No active plan to update."
+
+    try:
+        if action == "add_step":
+            if not description:
+                return "Error: 'description' is required for 'add_step'."
+            return _plan_manager.add_step(description, at_index=step_index)
+        elif action == "remove_step":
+            if step_index is None:
+                return "Error: 'step_index' is required for 'remove_step'."
+            return _plan_manager.remove_step(step_index)
+        elif action == "modify_step":
+            if step_index is None or not description:
+                return "Error: 'step_index' and 'description' are required for 'modify_step'."
+            return _plan_manager.modify_step(step_index, description)
+        else:
+            return f"Error: Unknown action '{action}'. Use 'add_step', 'remove_step', or 'modify_step'."
+    except Exception as e:
+        return f"Error updating plan: {str(e)}"
+
+
 # Registry for easy dispatch
 TOOL_HANDLERS = {
     "read_file": read_file,
@@ -112,4 +161,8 @@ TOOL_HANDLERS = {
     "git_status": git_status,
     # Test Execution (Feature 3.3)
     "run_tests": run_tests,
+    # Multi-Step Planning (Feature 4)
+    "create_plan": create_plan,
+    "update_plan": update_plan,
 }
+

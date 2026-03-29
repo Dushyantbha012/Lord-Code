@@ -11,6 +11,7 @@ from src.config import Config
 from src.llm.groq.factory import get_llm_client
 from src.cli.chat_loop import ChatLoop
 from src.context.project_config import ProjectConfig
+from src.context.storage import StorageManager
 from src.context.context import build_project_context, detect_languages, get_git_info
 
 def main():
@@ -37,6 +38,9 @@ def main():
 
     working_dir = os.getcwd()
 
+    # ── Initialize .lord-code Storage ──
+    storage = StorageManager(working_dir)
+
     # ── Load Project Configuration (.lordcode.yaml) ──
     project_config = ProjectConfig.load(working_dir)
     
@@ -47,23 +51,26 @@ def main():
         model_id = Config.DEFAULT_MODEL
 
     # ── Display Project Info on Startup ──
-    _display_project_info(working_dir, model_id, project_config)
+    _display_project_info(working_dir, model_id, project_config, storage)
 
     # ── Build Project Context ──
     ui.print("[dim]Gathering project context...[/dim]")
     project_context = build_project_context(working_dir, project_config)
 
     llm = get_llm_client(model_id)
-    chat = ChatLoop(llm, project_context=project_context, project_config=project_config)
+    chat = ChatLoop(llm, project_context=project_context, project_config=project_config, storage=storage)
     try:
         chat.run()
     finally:
+        # Finalize session on any exit
+        chat._finalize_session()
         if hasattr(chat, 'total_tokens') and chat.total_tokens['total'] > 0:
             ui.print(f"\nSession Total: {chat.total_tokens['total']} tokens "
                            f"(P: {chat.total_tokens['prompt']}, C: {chat.total_tokens['completion']})")
 
 
-def _display_project_info(working_dir: str, model_id: str, config: ProjectConfig):
+def _display_project_info(working_dir: str, model_id: str, config: ProjectConfig,
+                          storage: StorageManager):
     """Display a rich startup panel with detected project information."""
     lines = []
     
@@ -92,6 +99,20 @@ def _display_project_info(working_dir: str, model_id: str, config: ProjectConfig
     # Context limit
     ctx_limit = Config.MODEL_CONTEXT_LIMITS.get(model_id, 128_000)
     lines.append(f"[bold cyan]Context:[/bold cyan] {ctx_limit:,} tokens")
+
+    # .lord-code storage stats
+    stats = storage.get_stats()
+    storage_parts = []
+    if stats["session_count"] > 0:
+        storage_parts.append(f"{stats['session_count']} sessions")
+    if stats["config_snapshot_count"] > 0:
+        storage_parts.append(f"{stats['config_snapshot_count']} configs")
+    if stats["has_active_plan"]:
+        storage_parts.append("active plan")
+    if storage_parts:
+        lines.append(f"[bold cyan]Storage:[/bold cyan] {', '.join(storage_parts)}")
+    else:
+        lines.append(f"[bold cyan]Storage:[/bold cyan] .lord-code/ initialized")
 
     ui.print_panel("\n".join(lines), title="[bold white]🚀 Lord Code[/bold white]", style="bright_cyan")
 

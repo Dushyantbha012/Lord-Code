@@ -11,14 +11,15 @@ Lord Code is a CLI-based agentic coding assistant powered by the Groq API. It op
   - File operations: read, write, **diff-based edit** (search/replace blocks with unified diff preview).
   - Smart search: find files by pattern, search text within files, find code definitions.
   - Git integration: commit, branch, diff, stash/unstash, status — all with safety confirmation.
-  - Shell execution with safety rails.
-  - **Automatic linting**: Detects project linter and auto-runs after edits with `--fix` mode.
-  - **Test execution**: Auto-detects test frameworks and runs tests with retry logic (max 3 attempts).
+- **Multi-Step Planning**: For complex tasks, the agent proposes a structured, multi-stage plan for user approval before execution.
+- **Persistent `.lord-code/` Storage**: Per-project directory stores conversation history, active plans, and named configuration snapshots.
+- **Automatic linting**: Detects project linter and auto-runs after edits with `--fix` mode.
+- **Test execution**: Auto-detects test frameworks and runs tests with retry logic (max 3 attempts).
 - **Undo/Rollback System**: Automatic checkpoints before every file modification, with `/undo` to revert.
 - **Intelligent Context Management**: Real-time token tracking and automated conversation summarization to maximize context efficiency.
 - **Project Configuration**: Custom behavior via `.lordcode.yaml`.
 - **Safety Rails**: Blocked dangerous commands, path boundary checks, and confirmation prompts for destructive actions.
-- **Streaming Output**: Responsive real-time Markdown-rendered responses.
+- **Streaming Output**: Responsive real-time Markdown-rendered responses via a rich terminal UI.
 
 ## Getting Started
 
@@ -62,7 +63,10 @@ While in the chat loop, use slash commands to control the agent:
 - `/context`: Show detailed token usage and budget breakdown.
 - `/undo`: Revert the last set of AI-made file changes.
 - `/changes`: Show a log of all file modifications in the current session.
-- `/exit` or `/quit`: Gracefully exit the session.
+- `/plan`: View, approve, reject, skip, or modify the active multi-step plan.
+- `/history`: Browse past conversation sessions with summaries and token counts.
+- `/config`: Save, list, load, or export named configuration snapshots (model, budget, instructions).
+- `/exit` or `/quit`: Gracefully exit the session (saves history).
 
 ## Configuration (.lordcode.yaml)
 
@@ -126,6 +130,13 @@ Lord Code is equipped with a comprehensive set of tools:
 | `execute_command` | Run shell commands in the terminal. |
 | `run_tests` | Run the project's test suite (auto-detects pytest, npm, cargo, go). |
 
+### Planning Tools
+
+| Tool | Description |
+| --- | --- |
+| `create_plan` | Propose a structured multi-step plan for a complex task. |
+| `update_plan` | Modify, add, or remove steps from the active plan mid-execution. |
+
 ## Automatic Linting
 
 After any file modification (`write_file` or `edit_file`), Lord Code automatically:
@@ -143,6 +154,25 @@ The `run_tests` tool auto-detects your test framework:
 
 If tests fail, the AI can retry up to 3 times per user turn before stopping and reporting.
 
+## Multi-Step Planning
+
+For complex tasks (e.g., "refactor this module into a package and add tests"), Lord Code will:
+1. **Explain the goal** and propose a structured list of steps using `create_plan`.
+2. **Wait for your approval** before executing any tools (skip this for read-only plans).
+3. **Execute steps sequentially**, updating you on progress as it goes.
+4. **Adapt the plan** using `update_plan` if hidden complexities are discovered mid-way.
+
+You can control plans with `/plan approve`, `/plan reject`, `/plan skip <n>`, or `/plan modify` (interactive edit mode).
+
+## Persistence (.lord-code/ directory)
+
+Lord Code creates a hidden `.lord-code/` directory in your project root to maintain state across sessions:
+- **`history/`**: Stores every conversation as a searchable JSONL file.
+- **`plans/`**: Persists the active plan so you can resume mid-task after a restart.
+- **`configs/`**: Stores named configuration snapshots (e.g., "fast-iteration" vs "thorough-review").
+
+Lord Code automatically injects a summary of the last 2 sessions into its system prompt to maintain long-term context of your work.
+
 ## Undo/Rollback System
 
 Lord Code creates automatic checkpoints before every file modification:
@@ -151,17 +181,23 @@ Lord Code creates automatic checkpoints before every file modification:
 - Supports reverting multiple turns (LIFO order).
 - Newly created files are deleted on undo; modified files are restored to their original content.
 
-> **Note**: Undo history is session-scoped (in-memory only). It is not persisted across sessions.
+> **Note**: Undo history is session-scoped (in-memory only). Conversation history and plans are persistent in `.lord-code/`.
 
 ## Project Structure
 
-- `src/main.py`: Entry point and project context initialization.
-- `src/cli/`: Terminal chat loop, safety checks, and session management.
-- `src/context/`: Core logic for context gathering, token tracking, and configuration.
+- `src/main.py`: Entry point, storage initialization, and project context gathering.
+- `src/cli/`: Terminal chat loop, slash command handlers, and safety checks.
+- `src/context/`: Core logic for context gathering, token tracking, and configuration:
+  - `storage.py`: Centralized `.lord-code/` directory manager.
+  - `history.py`: Persistent session logging and recent context generation.
+  - `config_snapshots.py`: Named configuration snapshot management.
+  - `project_config.py`: `.lordcode.yaml` loading and serialization.
 - `src/llm/`: LLM client factory and provider implementations.
+- `src/agent/`: High-level agent logic:
+  - `planner.py`: Multi-step plan data model and stateful controller.
 - `src/tools/`: Tool definitions, handlers, and specialized modules:
   - `definitions.py`: Tool schema definitions for the LLM.
-  - `handlers.py`: Tool execution registry with undo integration.
+  - `handlers.py`: Tool execution registry and undo/plan injection.
   - `edit_file.py`: Diff-based editing engine (search/replace + unified diff).
   - `git_tools.py`: Git integration (commit, branch, stash, etc.).
   - `linter.py`: Automatic linter detection and execution.
@@ -169,3 +205,4 @@ Lord Code creates automatic checkpoints before every file modification:
   - `undo.py`: Checkpoint and rollback system.
   - `search.py`: Smart search implementations.
 - `src/config.py`: Centralized configuration and model metadata.
+- `src/ui/rich_ui.py`: Custom terminal UI rendering (rich tables, panels, live previews).
