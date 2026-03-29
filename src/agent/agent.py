@@ -42,8 +42,23 @@ class CodingAgent:
                 self.messages.append({"role": "assistant", "content": content})
                 return content
 
-            # Handle Tool Calls
-            self.messages.append(message)
+            # Handle Tool Calls - serialize the message strictly as a dict
+            assistant_msg = {
+                "role": "assistant",
+                "content": message.content,
+            }
+            if tool_calls:
+                assistant_msg["tool_calls"] = [
+                    {
+                        "id": call.id,
+                        "type": call.type,
+                        "function": {
+                            "name": call.function.name,
+                            "arguments": call.function.arguments
+                        }
+                    } for call in tool_calls
+                ]
+            self.messages.append(assistant_msg)
 
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
