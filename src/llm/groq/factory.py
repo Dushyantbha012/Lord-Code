@@ -6,6 +6,12 @@ from src.llm.groq.compound.client import CompoundClient
 from src.llm.groq.compound_mini.client import CompoundMiniClient
 
 def get_llm_client(model_id: str):
+    # ── Gemini models (delegated to Gemini factory) ──
+    if model_id.startswith("gemini/"):
+        from src.llm.gemini.factory import get_gemini_client
+        return get_gemini_client(model_id)
+
+    # ── Groq models ──
     mapping = {
         "openai/gpt-oss-120b": GPTOSS120BClient,
         "openai/gpt-oss-20b": GPTOSS20BClient,
@@ -20,3 +26,4 @@ def get_llm_client(model_id: str):
         raise ValueError(f"No client found for model: {model_id}")
     
     return client_class()
+

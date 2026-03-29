@@ -6,7 +6,7 @@ Lord Code is a CLI-based agentic coding assistant powered by the Groq API. It op
 
 - **Agentic Loop**: Autonomous reasoning and tool execution.
 - **Smart Context Awareness**: Automatically gathers directory tree, git status, and key file summaries to provide the models with deep codebase awareness.
-- **Multi-Model Support**: Switch between high-performance Groq models and compound systems at runtime.
+- **Multi-Model Support**: Switch between high-performance Groq models, compound systems, and Google Gemini models at runtime.
 - **Advanced Toolset**:
   - File operations: read, write, **diff-based edit** (search/replace blocks with unified diff preview).
   - Smart search: find files by pattern, search text within files, find code definitions.
@@ -27,7 +27,7 @@ Lord Code is a CLI-based agentic coding assistant powered by the Groq API. It op
 ### Prerequisites
 
 - Python 3.10+
-- A [Groq Cloud](https://console.groq.com/) API Key.
+- A [Groq Cloud](https://console.groq.com/) API Key and/or a [Google Gemini](https://aistudio.google.com/) API Key.
 
 ### Installation
 
@@ -40,11 +40,12 @@ Lord Code is a CLI-based agentic coding assistant powered by the Groq API. It op
 3. Install dependencies:
    ```bash
    pip install -e .
-   pip install tiktoken pathspec pyyaml
+   pip install tiktoken pathspec pyyaml openai
    ```
 4. Configure your `.env` file:
    ```bash
    echo "GROQ_API_KEY=your_groq_api_key_here" > .env
+   echo "GEMINI_API_KEY=your_gemini_api_key_here" >> .env
    ```
 
 ### Usage
@@ -57,9 +58,9 @@ python3 src/main.py
 ### CLI Commands
 
 While in the chat loop, use slash commands to control the agent:
-- `/models`: List all available Groq models and their context limits.
-- `/model <model_id>`: Switch the active LLM.
-- `/reasoning-on`: Enable reasoning mode.
+- `/models`: List all available models (Groq and Gemini) and their context limits.
+- `/model <model_id>`: Switch the active LLM (e.g., `/model gemini/2.5-flash`).
+- `/reasoning-on`: Enable reasoning mode. For standard models, this injects a step-by-step thinking prompt. For Gemini "Thinking" models, this invokes the native `thinking_config` API and exposes their Thought Signatures.
 - `/reasoning-off`: Disable reasoning mode.
 - `/context`: Show detailed token usage and budget breakdown.
 - `/undo`: Revert the last set of AI-made file changes.
