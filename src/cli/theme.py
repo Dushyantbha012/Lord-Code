@@ -2,6 +2,7 @@
 Lord Code - Terminal theme and splash screen UI.
 """
 
+from typing import Any, List, Dict
 from rich.console import Console
 from rich.theme import Theme
 from rich.rule import Rule
@@ -157,10 +158,32 @@ def print_terminal_preview(command: str) -> None:
 def ask_confirmation(message: str) -> bool:
     """Ask for user confirmation (y/n)."""
     console.print(f"\n  [warning]⚠ [/warning] [brand]{message}[/brand] [muted](y/n)[/muted]")
-    from prompt_toolkit.shortcuts import confirm
-    # Using simple prompt fallback for now, but confirm() is better.
     try:
         choice = input("  ❯ ").strip().lower()
         return choice in ["y", "yes"]
     except:
         return False
+
+def print_token_usage(usage: Any) -> None:
+    """Print the token usage for the last request."""
+    if not usage:
+        return
+        
+    try:
+        prompt = getattr(usage, "prompt_tokens", 0)
+        completion = getattr(usage, "completion_tokens", 0)
+        total = getattr(usage, "total_tokens", 0)
+        
+        usage_text = Text()
+        usage_text.append("  ⠿ ", style="dim white")
+        usage_text.append("Tokens: ", style="muted")
+        usage_text.append(f"{prompt}", style="info")
+        usage_text.append(" (in) / ", style="muted")
+        usage_text.append(f"{completion}", style="info")
+        usage_text.append(" (out) = ", style="muted")
+        usage_text.append(f"{total}", style="brand")
+        
+        console.print(usage_text)
+        console.print()
+    except:
+        pass

@@ -6,20 +6,12 @@ from src.tools.utils import find_project_root
 
 @tool(
     name="read_file",
-    description="Read the contents of a file. Use paths relative to the project root (e.g., 'src/main.py')."
+    description="Read the contents of a file. Use paths relative pr project root (e.g., 'src/main.py')."
 )
 def read_file(path: str) -> str:
-    """Reads a file relative to the project root. Restricts access to .env files."""
+    """Reads a file relative to the project root."""
     project_root = find_project_root()
     absolute_path = os.path.abspath(os.path.join(project_root, path))
-    
-    # Security: Project jail
-    if not absolute_path.startswith(project_root):
-        return f"Error: Access denied. Cannot read outside project root: {path}"
-    
-    # Security: .env restriction
-    if os.path.basename(absolute_path).startswith(".env"):
-        return f"Error: Access denied. Reading .env files is restricted."
     
     if not os.path.exists(absolute_path):
         return f"Error: File not found: {path}"
@@ -40,14 +32,6 @@ def write_file(path: str, content: str) -> str:
     project_root = find_project_root()
     absolute_path = os.path.abspath(os.path.join(project_root, path))
     
-    # Security: Project jail
-    if not absolute_path.startswith(project_root):
-        return f"Error: Access denied. Cannot write outside project root."
-    
-    # Security: .env restriction
-    if os.path.basename(absolute_path).startswith(".env"):
-        return f"Error: Access denied. Modifying .env files is restricted."
-        
     try:
         os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
         with open(absolute_path, "w", encoding="utf-8") as f:

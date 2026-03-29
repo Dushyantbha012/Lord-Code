@@ -24,6 +24,8 @@ class CodingAgent:
         self.messages: List[Dict[str, Any]] = [
             {"role": "system", "content": self.system_prompt}
         ]
+        from src.safety.guardrail import safety_guard
+        self.safety = safety_guard
 
     def chat(self, user_input: str) -> str:
         """Process user input and handle tool calls with multi-turn orchestration."""
@@ -32,8 +34,12 @@ class CodingAgent:
         while True:
             # 1. Get completion with tool schemas
             schemas = tool_manager.get_tool_schemas()
-            completion = self.client.get_chat_completion(self.messages, tools=schemas)
+            completion, usage = self.client.get_chat_completion(self.messages, tools=schemas)
             
+            # Report usage
+            from src.cli.theme import print_token_usage
+            print_token_usage(usage)
+
             message = completion.choices[0].message
             tool_calls = getattr(message, "tool_calls", None)
 
@@ -64,32 +70,40 @@ class CodingAgent:
                 function_name = tool_call.function.name
                 function_args = tool_call.function.arguments
                 
-                # Visual log
+                # Visual log & Safety Check
                 try:
                     args_dict = json.loads(function_args)
                     from src.cli.theme import print_tool_call, print_terminal_preview, ask_confirmation
                     
-                    if function_name == "run_command":
-                        cmd = args_dict.get("command", "")
-                        print_terminal_preview(cmd)
+                    # --- Safety Guardrail Check ---
+                    risk = self.safety.get_tool_risk(function_name, args_dict)
+                    
+                    if risk == "blocked":
+                        result = f"Error: Action blocked by safety guardrail. Restricted path or command."
+                    elif risk == "high":
+                        # Require confirmation
+                        if function_name == "run_command":
+                            print_terminal_preview(args_dict.get("command", ""))
+                            if not ask_confirmation("Proceed with high-risk command?"):
+                                result = "User cancelled execution."
+                            else:
+                                result = tool_manager.execute_tool(function_name, function_args)
+                        else:
+                            print_tool_call(function_name, args_dict)
+                            if not ask_confirmation(f"Confirm {function_name}?"):
+                                result = "User cancelled execution."
+                            else:
+                                result = tool_manager.execute_tool(function_name, function_args)
                     else:
-                        print_tool_call(function_name, args_dict)
-                except:
-                    from src.cli.theme import print_tool_call
-                    print_tool_call(function_name, {"raw": function_args})
-
-                # Execute tool
-                result = tool_manager.execute_tool(function_name, function_args)
-                
-                # Handle approval logic for shell deletions
-                if function_name == "run_command" and result.startswith("APPROVAL_REQUIRED:"):
-                    if ask_confirmation("Do you want to proceed with this command?"):
-                        # Re-run with approved prefix
-                        cmd = json.loads(function_args).get("command", "")
-                        approved_args = json.dumps({"command": f"#APPROVED# {cmd}"})
-                        result = tool_manager.execute_tool(function_name, approved_args)
-                    else:
-                        result = "User cancelled command execution."
+                        # Low risk - automatic execution
+                        if function_name == "run_command":
+                            print_terminal_preview(args_dict.get("command", ""))
+                        else:
+                            print_tool_call(function_name, args_dict)
+                        result = tool_manager.execute_tool(function_name, function_args)
+                except Exception as e:
+                    # Fallback for parsing errors
+                    result = f"Error: {str(e)}"
 
                 # Append tool result to history
                 self.messages.append({

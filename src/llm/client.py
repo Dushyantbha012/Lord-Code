@@ -27,7 +27,7 @@ class GroqClient:
                 kwargs["tool_choice"] = "auto"
                 
             chat_completion = self.client.chat.completions.create(**kwargs)
-            return chat_completion
+            return chat_completion, getattr(chat_completion, "usage", None)
         except Exception as e:
             # We'll handle errors in the agent layer
             raise e
