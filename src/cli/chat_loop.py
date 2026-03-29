@@ -15,6 +15,7 @@ from src.context.config_snapshots import ConfigSnapshotManager
 from src.tools.undo import UndoManager
 from src.tools.linter import run_linter
 from src.agent.planner import PlanManager, PlanStatus, StepStatus
+from src.agent.parallel import ParallelExecutor, ToolTask, TaskStatus, build_tasks
 from src.ui.rich_ui import ui
 import time
 
@@ -89,6 +90,12 @@ class ChatLoop:
             "- When executing a plan, work through steps one at a time and report progress.",
             "- If you discover that the plan needs adjustment mid-execution, call `update_plan` to modify it.",
             "- After each step is completed, briefly state the result before moving on.",
+            "",
+            "## Parallel Execution",
+            "- When you need to perform multiple independent operations (e.g., reading several files,",
+            "  searching across multiple patterns), issue ALL tool calls in a single response.",
+            "- The system will automatically execute independent tools in parallel for faster results.",
+            "- Write operations to different files can also be parallelized.",
             "",
         ]
 
@@ -724,26 +731,29 @@ class ChatLoop:
             }
             self.messages.append(tc_msg)
             self.history_manager.append_message(tc_msg)
-            
+
+            # ── Phase 1: Pre-check ALL tool calls (safety, confirmation) ──
+            approved_calls = []   # (tc, parsed_args)
             for tc in tool_calls:
                 name = tc["function"]["name"]
                 args = json.loads(tc["function"]["arguments"])
-                
-                # Safety Checks
+
+                # Safety: command blocklist
                 if name == "execute_command":
                     cmd = args.get("command", "")
                     if not is_command_safe(cmd):
                         ui.print(f"[bold red]Blocked dangerous command:[/bold red] {cmd}")
                         self._add_tool_result(tc["id"], name, "Error: Command was blocked for safety.")
                         continue
-                
+
+                # Safety: path bounds
                 if "path" in args:
                     if not is_path_safe(args["path"], root_dir):
                         ui.print(f"[bold red]Blocked out-of-bounds path:[/bold red] {args['path']}")
                         self._add_tool_result(tc["id"], name, "Error: Path access restricted to project directory.")
                         continue
 
-                # Confirmation for destructive actions
+                # Safety: confirmation for destructive tools
                 if needs_confirmation(name):
                     ui.print(f"\n[bold yellow]Safety Check:[/bold yellow] AI wants to run {name}({args})")
                     confirm = input("Approve? (y/n): ").strip().lower()
@@ -752,55 +762,70 @@ class ChatLoop:
                         self._add_tool_result(tc["id"], name, "Error: User denied permission for this action.")
                         continue
 
-                ui.print_tool_call(name, args)
-                ui.start_spinner(f"Executing {name}...")
-                
-                handler = handlers.get(name)
-                result = handler(**args) if handler else f"Error: Tool {name} not found."
-                
-                ui.stop_spinner()
-                ui.print_tool_result(result, name)
-                self._add_tool_result(tc["id"], name, result)
+                approved_calls.append((tc, args))
 
-                # ── Plan Approval Gate (Feature 4) ──
-                if name == "create_plan" and self.plan_manager.current_plan:
-                    self._handle_plan_approval_gate()
+            # ── Phase 2: Build tasks and classify ──
+            if approved_calls:
+                tasks = build_tasks(
+                    [tc for tc, _ in approved_calls],
+                    [args for _, args in approved_calls],
+                    handlers,
+                )
 
-                # ── Plan Step Tracking (Feature 4) ──
-                if name == "update_plan" and self.plan_manager.current_plan:
-                    ui.print_plan(self.plan_manager.current_plan)
+                executor = ParallelExecutor(max_workers=4)
+                parallel_tasks, sequential_tasks = executor.classify(tasks)
 
-                # ── Plan Step Auto-Advance ──
-                if self.plan_manager.current_plan and self.plan_manager.current_plan.is_active:
-                    self._auto_advance_plan_step(name, result)
+                use_parallel = len(parallel_tasks) > 1  # Only parallelize if >1 task
 
-                # ── Auto-Lint after file edits (Feature 3.2) ──
-                if name in ("write_file", "edit_file") and not result.startswith("Error"):
-                    file_path = args.get("path", "")
-                    if file_path:
-                        self._run_lint_after_edit(file_path)
+                if use_parallel:
+                    # ── Phase 3a: Parallel execution with progress ──
+                    ui.print_parallel_start(
+                        len(tasks), len(parallel_tasks), len(sequential_tasks)
+                    )
 
-                # ── Test retry logic (Feature 3.3) ──
-                if name == "run_tests" and "FAILED" in result:
-                    self._test_retry_count += 1
-                    if self._test_retry_count < self._max_test_retries:
-                        ui.print(
-                            f"  [yellow]⚠ Tests failed (attempt {self._test_retry_count}/{self._max_test_retries})"
-                            f" — AI will attempt to fix...[/yellow]"
-                        )
-                    else:
-                        ui.print(
-                            f"  [bold red]✖ Max test retries ({self._max_test_retries}) reached. "
-                            f"Manual intervention needed.[/bold red]"
-                        )
-                        # Add a message to stop the LLM from retrying
-                        self.messages.append({
-                            "role": "user",
-                            "content": (
-                                "[SYSTEM] Maximum test retry limit reached. "
-                                "Stop attempting to fix and summarize the remaining failures for the user."
-                            ),
-                        })
+                    batch_start = time.time()
+
+                    def on_progress(task):
+                        ui.print_parallel_progress(task)
+
+                    result = executor.execute_parallel(parallel_tasks, on_progress=on_progress)
+
+                    # Add parallel results to messages & run post-hooks
+                    for task in parallel_tasks:
+                        self._add_tool_result(task.tool_call_id, task.name, task.result or "")
+                        self._run_post_hooks(task.name, task.args, task.result or "")
+
+                    # Execute sequential tasks one by one
+                    for task in sequential_tasks:
+                        ui.print_tool_call(task.name, task.args)
+                        ui.start_spinner(f"Executing {task.name}...")
+
+                        executor.execute_one(task)
+
+                        ui.stop_spinner()
+                        ui.print_tool_result(task.result or "", task.name)
+                        self._add_tool_result(task.tool_call_id, task.name, task.result or "")
+                        self._run_post_hooks(task.name, task.args, task.result or "")
+
+                    batch_duration = time.time() - batch_start
+                    ui.print_parallel_summary(
+                        len(parallel_tasks), len(sequential_tasks),
+                        batch_duration, tasks=tasks,
+                    )
+
+                else:
+                    # ── Phase 3b: All sequential (single task or all sequential-only) ──
+                    all_tasks = parallel_tasks + sequential_tasks
+                    for task in all_tasks:
+                        ui.print_tool_call(task.name, task.args)
+                        ui.start_spinner(f"Executing {task.name}...")
+
+                        executor.execute_one(task)
+
+                        ui.stop_spinner()
+                        ui.print_tool_result(task.result or "", task.name)
+                        self._add_tool_result(task.tool_call_id, task.name, task.result or "")
+                        self._run_post_hooks(task.name, task.args, task.result or "")
 
             # If plan was rejected, don't recurse — stop the agent loop
             if (self.plan_manager.current_plan 
@@ -828,6 +853,47 @@ class ChatLoop:
                 usage = next_usage
                 
         return usage
+
+    def _run_post_hooks(self, name: str, args: dict, result: str):
+        """Run all post-execution hooks for a tool (plan, lint, test retry)."""
+        # ── Plan Approval Gate ──
+        if name == "create_plan" and self.plan_manager.current_plan:
+            self._handle_plan_approval_gate()
+
+        # ── Plan Step Tracking ──
+        if name == "update_plan" and self.plan_manager.current_plan:
+            ui.print_plan(self.plan_manager.current_plan)
+
+        # ── Plan Step Auto-Advance ──
+        if self.plan_manager.current_plan and self.plan_manager.current_plan.is_active:
+            self._auto_advance_plan_step(name, result)
+
+        # ── Auto-Lint after file edits ──
+        if name in ("write_file", "edit_file") and not result.startswith("Error"):
+            file_path = args.get("path", "")
+            if file_path:
+                self._run_lint_after_edit(file_path)
+
+        # ── Test retry logic ──
+        if name == "run_tests" and "FAILED" in result:
+            self._test_retry_count += 1
+            if self._test_retry_count < self._max_test_retries:
+                ui.print(
+                    f"  [yellow]⚠ Tests failed (attempt {self._test_retry_count}/{self._max_test_retries})"
+                    f" — AI will attempt to fix...[/yellow]"
+                )
+            else:
+                ui.print(
+                    f"  [bold red]✖ Max test retries ({self._max_test_retries}) reached. "
+                    f"Manual intervention needed.[/bold red]"
+                )
+                self.messages.append({
+                    "role": "user",
+                    "content": (
+                        "[SYSTEM] Maximum test retry limit reached. "
+                        "Stop attempting to fix and summarize the remaining failures for the user."
+                    ),
+                })
 
     # ── Plan Approval Gate ────────────────────────────────────────────────
 

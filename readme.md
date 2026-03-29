@@ -12,6 +12,7 @@ Lord Code is a CLI-based agentic coding assistant powered by the Groq API. It op
   - Smart search: find files by pattern, search text within files, find code definitions.
   - Git integration: commit, branch, diff, stash/unstash, status — all with safety confirmation.
 - **Multi-Step Planning**: For complex tasks, the agent proposes a structured, multi-stage plan for user approval before execution.
+- **Parallel Tool Execution**: Independent tool calls (reads, searches) execute concurrently via a thread pool with real-time progress tracking.
 - **Persistent `.lord-code/` Storage**: Per-project directory stores conversation history, active plans, and named configuration snapshots.
 - **Automatic linting**: Detects project linter and auto-runs after edits with `--fix` mode.
 - **Test execution**: Auto-detects test frameworks and runs tests with retry logic (max 3 attempts).

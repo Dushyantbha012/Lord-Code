@@ -196,5 +196,101 @@ class RichUI:
             response = "n"
         return response if response in ("y", "n", "e") else "y"
 
+    # ── Parallel Execution UI (Sub-Agent Feature) ─────────────────────────
+
+    def print_parallel_start(self, task_count: int, parallel_count: int, sequential_count: int) -> None:
+        """Show a header when parallel execution begins."""
+        parts = []
+        if parallel_count > 0:
+            parts.append(f"[bold green]{parallel_count} parallel[/bold green]")
+        if sequential_count > 0:
+            parts.append(f"[bold yellow]{sequential_count} sequential[/bold yellow]")
+
+        self.console.print(
+            f"\n[bold cyan]⚡ Executing {task_count} tools[/bold cyan] "
+            f"({' + '.join(parts)})"
+        )
+
+    def print_parallel_progress(self, task) -> None:
+        """
+        Print a compact per-task status line.
+
+        Args:
+            task: A ToolTask with status, name, args, duration
+        """
+        from src.agent.parallel import TaskStatus
+
+        icons = {
+            TaskStatus.PENDING: "⏳",
+            TaskStatus.RUNNING: "🔄",
+            TaskStatus.DONE: "✅",
+            TaskStatus.FAILED: "❌",
+            TaskStatus.SKIPPED: "⏭️",
+        }
+        colors = {
+            TaskStatus.PENDING: "dim",
+            TaskStatus.RUNNING: "yellow",
+            TaskStatus.DONE: "green",
+            TaskStatus.FAILED: "red",
+            TaskStatus.SKIPPED: "dim",
+        }
+
+        icon = icons.get(task.status, "•")
+        color = colors.get(task.status, "white")
+
+        # Build a short arg summary
+        arg_preview = ""
+        if "path" in task.args:
+            arg_preview = task.args["path"]
+        elif "command" in task.args:
+            arg_preview = task.args["command"][:60]
+        elif "query" in task.args:
+            arg_preview = task.args["query"][:40]
+        elif "name_pattern" in task.args:
+            arg_preview = task.args["name_pattern"]
+
+        duration_str = f" ({task.duration:.1f}s)" if task.duration > 0 else ""
+
+        self.console.print(
+            f"  {icon} [{color}]{task.name}[/{color}]"
+            f"({arg_preview}){duration_str}"
+        )
+
+    def print_parallel_summary(self, parallel_count: int, sequential_count: int,
+                                total_duration: float, tasks=None) -> None:
+        """
+        Compact summary after parallel+sequential execution completes.
+
+        Args:
+            parallel_count: Number of tasks run in parallel
+            sequential_count: Number of tasks run sequentially
+            total_duration: Wall-clock time for the entire batch
+            tasks: Optional list of ToolTask for detailed stats
+        """
+        # Count successes/failures
+        done = 0
+        failed = 0
+        if tasks:
+            for t in tasks:
+                from src.agent.parallel import TaskStatus
+                if t.status == TaskStatus.DONE:
+                    done += 1
+                elif t.status == TaskStatus.FAILED:
+                    failed += 1
+
+        parts = [f"[bold cyan]{done + failed} tools[/bold cyan]"]
+        if parallel_count > 0:
+            parts.append(f"[green]{parallel_count} parallel[/green]")
+        if sequential_count > 0:
+            parts.append(f"[yellow]{sequential_count} sequential[/yellow]")
+        if failed > 0:
+            parts.append(f"[red]{failed} failed[/red]")
+
+        self.console.print(
+            f"  [dim]⚡ Completed {' | '.join(parts)} "
+            f"in {total_duration:.1f}s[/dim]"
+        )
+
 # Global UI instance
 ui = RichUI()
+
