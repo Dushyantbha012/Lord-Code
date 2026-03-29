@@ -1,3 +1,3 @@
-from src.cli.app import CLIApp
-
-__all__ = ["CLIApp"]
+"""
+Lord Code CLI package.
+"""

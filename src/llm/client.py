@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from groq import Groq
 from src.config import GROQ_API_KEY, DEFAULT_MODEL
 
@@ -14,13 +14,20 @@ class GroqClient:
             
         self.client = Groq(api_key=self.api_key)
 
-    def get_chat_completion(self, messages: List[Dict[str, str]]) -> str:
-        """Fetch a chat completion from the Groq API."""
+    def get_chat_completion(self, messages: List[Dict[str, str]], tools: Optional[List[Dict[str, Any]]] = None) -> Any:
+        """Fetch a chat completion from the Groq API with tool support."""
         try:
-            chat_completion = self.client.chat.completions.create(
-                messages=messages,
-                model=self.model,
-            )
-            return chat_completion.choices[0].message.content or ""
+            kwargs = {
+                "messages": messages,
+                "model": self.model,
+            }
+            if tools:
+                # Filter to match Groq's tool format (wrapping in type: function)
+                kwargs["tools"] = [{"type": "function", "function": t} for t in tools]
+                kwargs["tool_choice"] = "auto"
+                
+            chat_completion = self.client.chat.completions.create(**kwargs)
+            return chat_completion
         except Exception as e:
-            return f"Error: Failed to get response from Groq. {str(e)}"
+            # We'll handle errors in the agent layer
+            raise e

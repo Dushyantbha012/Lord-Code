@@ -137,3 +137,7 @@ def print_ai_message(message: str) -> None:
     console.print()
     console.print(panel)
     console.print()
+def print_tool_call(name: str, arguments: dict) -> None:
+    """Print a tool call with its arguments."""
+    arg_str = ", ".join(f"[muted]{k}[/muted]=[info]{v}[/info]" for k, v in arguments.items())
+    console.print(f"  [accent]⚙[/accent] [brand]Executing {name}[/brand]({arg_str})...")

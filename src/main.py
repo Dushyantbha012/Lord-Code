@@ -6,7 +6,7 @@ Usage:
     lord-code          (after `pip install -e .`)
 """
 
-from src.cli import CLIApp
+from src.cli.app import CLIApp
 
 
 def main() -> None:
