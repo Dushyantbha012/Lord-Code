@@ -2,3 +2,4 @@
 /venv
 /lord_code.egg-info
 /src/lord_code.egg-info
+.lord_code/

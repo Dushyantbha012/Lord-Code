@@ -38,8 +38,11 @@ tool_manager = ToolManager()
 # Automatically register tools
 from src.tools.file_ops import read_file, write_file, list_dir
 from src.tools.shell import run_command
+from src.tools.memory import remember, recall
 
 tool_manager.register(read_file)
 tool_manager.register(write_file)
 tool_manager.register(list_dir)
 tool_manager.register(run_command)
+tool_manager.register(remember)
+tool_manager.register(recall)

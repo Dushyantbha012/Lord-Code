@@ -26,10 +26,16 @@ class CodingAgent:
         ]
         from src.safety.guardrail import safety_guard
         self.safety = safety_guard
+        from src.agent.context import ContextManager
+        self.context_manager = ContextManager()
 
     def chat(self, user_input: str) -> str:
         """Process user input and handle tool calls with multi-turn orchestration."""
-        self.messages.append({"role": "user", "content": user_input})
+        # 0. Context Injection (Grounding the user's request)
+        context_block = self.context_manager.get_full_context_block()
+        grounded_input = f"{context_block}\nUser Task: {user_input}" if context_block else user_input
+        
+        self.messages.append({"role": "user", "content": grounded_input})
 
         while True:
             # 1. Get completion with tool schemas
